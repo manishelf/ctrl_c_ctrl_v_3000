@@ -2,3 +2,5 @@ ctrl_c_ctrl_v_3000
 *.o
 *.a
 *.so
+/build
+/.cache
