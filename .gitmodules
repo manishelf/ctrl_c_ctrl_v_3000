@@ -7,3 +7,6 @@
 [submodule "tinydir"]
 	path = tinydir
 	url = https://github.com/cxong/tinydir
+[submodule "samples/qtodo-spring-backend"]
+	path = samples/qtodo-spring-backend
+	url = https://github.com/manishelf/qtodo-spring-backend
