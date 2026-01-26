@@ -1,5 +1,5 @@
-#ifndef LIB_H
-#define LIB_H
+#ifndef LIB_X_H
+#define LIB_X_H
 
 #include <cstring>
 #include <fstream>
@@ -11,6 +11,16 @@
 #include <vector>
 
 using namespace std;
+
+/**
+ *Tree-sitter produces concrete syntax trees
+ * usefull links - 
+ * https://tree-sitter.github.io/tree-sitter/7-playground.html
+ * https://tree-sitter.github.io/tree-sitter/4-code-navigation.html
+ * https://tree-sitter.github.io/tree-sitter/index.html
+ * https://parsiya.net/blog/knee-deep-tree-sitter-query/
+ * https://dev.to/shrsv/decoding-tree-sitter-playground-output-for-fun-33de
+ */
 
 void print_TSNode(const string source_code, const TSNode node,
                   const string &indent = "") {

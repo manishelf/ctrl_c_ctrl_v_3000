@@ -93,6 +93,7 @@ struct FileContentWalker {
         return ENTRY_ACTION::CONTINUE;
 
       TargetFile *file = dynamic_cast<TargetFile *>(entry);
+      file->blockSize = 40960;
       if (file && file->loadFile()) {
         while (file->hasNextBlock) {
           TargetFile::Block block = file->next();

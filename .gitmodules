@@ -1,11 +1,11 @@
 [submodule "tree-sitter"]
-	path = tree-sitter
+	path = deps/tree-sitter
 	url = https://github.com/tree-sitter/tree-sitter
 [submodule "tree-sitter-java"]
-	path = tree-sitter-java
+	path = deps/tree-sitter-parsers/tree-sitter-java
 	url = https://github.com/tree-sitter/tree-sitter-java
 [submodule "tinydir"]
-	path = tinydir
+	path = deps/tinydir
 	url = https://github.com/cxong/tinydir
 [submodule "samples/qtodo-spring-backend"]
 	path = samples/qtodo-spring-backend
