@@ -32,6 +32,7 @@ int main() {
     DirWalker walker(".");
     if (walker.isValid) {
         // Recursive = false (just current dir)
+        walker.recursive = true;
         walker.walk(pool, printAction);
     } else {
         std::cerr << "Failed to open directory.\n";

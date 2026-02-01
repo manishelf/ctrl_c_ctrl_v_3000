@@ -297,9 +297,10 @@ DirWalker::STATUS DirWalker::walk(WalkAction_t action) {
       return STATUS::ABORTED;
     } else if (actRes == ACTION::CONTINUE && file.is_dir && recursive &&
                !(fileName == "." || fileName == "..")) {
-      DirWalker childDirWalker(file.path);
-      childDirWalker.level = this->level + 1;
-      STATUS res = childDirWalker.walk(action);
+      DirWalker child(file.path);
+      child.recursive = recursive;
+      child.level = this->level + 1;
+      STATUS res = child.walk(action);
       if (res == STATUS::ABORTED) {
         return res;
       } else if (res == STATUS::FAILED) {
@@ -333,6 +334,7 @@ void DirWalker::walk(ThreadPool &pool, WalkAction_t action,
 
     if (file.is_dir && recursive) {
       DirWalker child(file.path);
+      child.recursive = recursive;
       child.walk(pool, action, abortSignal);
     } else {
 
