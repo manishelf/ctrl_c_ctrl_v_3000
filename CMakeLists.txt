@@ -2,68 +2,70 @@ cmake_minimum_required(VERSION 3.10)
 
 project(CtrlC_CtrlV_3000 VERSION 1.0 LANGUAGES C CXX)
 
-# -----------------------
-# C++ settings
-# -----------------------
+
+# set
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# -----------------------
-# Include directories
-# -----------------------
-include_directories(
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE) 
+set(BUILD_TESTS OFF CACHE BOOL "" FORCE)        
+set(BUILD_CLI OFF CACHE BOOL "" FORCE)        
+set(BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)   
+set(USE_SSH OFF CACHE BOOL "" FORCE)           # Disable SSH (requires libssh2)
+set(USE_HTTPS OFF CACHE BOOL "" FORCE)         # Disable OpenSSL/WinHTTP
+set(USE_BUNDLED_ZLIB ON CACHE BOOL "" FORCE)   # Use internal zlib 
+set(USE_HTTP_PARSER "builtin" CACHE STRING "" FORCE)
+set(USE_GSSAPI OFF CACHE BOOL "" FORCE)        # Disable network auth
+set(USE_NTLMCLIENT OFF CACHE BOOL "" FORCE)    # Disable network auth
+
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE) 
+set(TREE_SITTER_BUILD_TESTS OFF CACHE BOOL "" FORCE) 
+
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+add_compile_options(-Wall -Wextra -ggdb)
+
+# exec
+
+add_executable(
+  ctrl_c_ctrl_v_3000 
+  main.cpp
+)
+
+# deps
+
+add_subdirectory(deps/tree-sitter)
+add_subdirectory(deps/libgit2)
+add_subdirectory(deps/tree-sitter-parsers/tree-sitter-java)
+
+add_dependencies(ctrl_c_ctrl_v_3000 libgit2 tree-sitter tree-sitter-java)
+
+find_package(Threads REQUIRED)
+
+# include
+
+target_include_directories(ctrl_c_ctrl_v_3000 PUBLIC
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/deps/tinydir
+    ${CMAKE_SOURCE_DIR}/deps/libgit2/include
     ${CMAKE_SOURCE_DIR}/deps/tree-sitter/lib/include
     ${CMAKE_SOURCE_DIR}/deps/tree-sitter-parsers/tree-sitter-java/src
 )
 
-# -----------------------
-# Build tree-sitter using Makefile
-# -----------------------
-add_custom_target(make_tree_sitter
-    COMMAND make
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}/deps/tree-sitter
-    BYPRODUCTS ${CMAKE_SOURCE_DIR}/deps/tree-sitter/libtree-sitter.a
+# Link
+
+target_link_libraries(ctrl_c_ctrl_v_3000 PUBLIC
+  tree-sitter
+  libgit2 libgit2package
+  tree-sitter-java
+  Threads::Threads
 )
 
-# Tell CMake that libtree-sitter.a is a real library target
-add_library(tree_sitter STATIC IMPORTED GLOBAL)
+# Post
 
-set_target_properties(tree_sitter PROPERTIES
-    IMPORTED_LOCATION
-        ${CMAKE_SOURCE_DIR}/deps/tree-sitter/libtree-sitter.a
-)
+message(STATUS "Project: ${PROJECT_NAME} v${PROJECT_VERSION}")
+message(STATUS "Build type: ${CMAKE_BUILD_TYPE}")
 
-# Ensure make runs before linking
-add_dependencies(tree_sitter make_tree_sitter)
 
-# -----------------------
-# tree-sitter-java parser
-# -----------------------
-add_library(tree_sitter_java_obj OBJECT
-    deps/tree-sitter-parsers/tree-sitter-java/src/parser.c
-)
-
-# -----------------------
-# Main executable
-# -----------------------
-add_executable(ctrl_c_ctrl_v_3000
-    main.cpp
-    $<TARGET_OBJECTS:tree_sitter_java_obj>
-)
-
-# -----------------------
-# Link libraries
-# -----------------------
-target_link_libraries(ctrl_c_ctrl_v_3000 PRIVATE
-    tree_sitter
-)
-
-# -----------------------
-# Debug flags
-# -----------------------
-if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_options(ctrl_c_ctrl_v_3000 PRIVATE -g -Wall)
-endif()

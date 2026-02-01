@@ -2,12 +2,14 @@
 CC      := gcc
 CXX     := g++
 CFLAGS  := -I deps/tree-sitter/lib/include \
-           -I deps/tree-sitter-parsers/tree-sitter-java/src
+           -I deps/tree-sitter-parsers/tree-sitter-java/src \
+					 -g -O0
 
 CXXFLAGS := -I ./include \
             -I deps/tree-sitter/lib/include \
             -I deps/tree-sitter/parsers/tree-sitter-java/src \
-            -I deps/tinydir
+            -I deps/tinydir \
+						-g -O0
 
 LDFLAGS := deps/tree-sitter/libtree-sitter.a
 
@@ -20,11 +22,11 @@ all: deps/tree-sitter deps/tree-sitter-parsers/tree-sitter-java $(TARGET)
 
 # Build tree-sitter
 tree-sitter:
-	$(MAKE) -C deps/tree-sitter
+	$(MAKE) -g -O0 -C deps/tree-sitter
 
 # Build tree-sitter-java
 tree-sitter-java:
-	$(MAKE) -C deps/tree-sitter-parsers/tree-sitter-java
+	$(MAKE) -g -O0 -C deps/tree-sitter-parsers/tree-sitter-java
 
 # Compile Java parser
 tree_sitter_java.o: deps/tree-sitter-parsers/tree-sitter-java/src/parser.c
@@ -32,7 +34,7 @@ tree_sitter_java.o: deps/tree-sitter-parsers/tree-sitter-java/src/parser.c
 
 # Compile main
 ctrl_c_ctrl_v_3000.o: main.cpp 
-	$(CXX) $(CXXFLAGS) -g -c $< -o $@
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 # Link executable
 $(TARGET): $(OBJ)

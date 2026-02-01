@@ -1,0 +1,189 @@
+#ifndef LIB_H
+#define LIB_H
+
+#include <condition_variable>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <mutex>
+#include <queue>
+#include <string>
+#include <thread>
+#include <tinydir.h>
+#include <vector>
+
+// ----------------------------------------------------------
+// API
+// ----------------------------------------------------------
+
+class FileContentWalker {
+  std::ifstream fileStream;
+  tinydir_file file;
+
+public:
+  char *buf = nullptr;
+  size_t pos;
+  size_t defaultBlockSize;
+  size_t fileSize;
+  bool readReverse;
+  FileContentWalker(tinydir_file file);
+  ~FileContentWalker();
+
+  typedef struct {
+    char *cont;
+    size_t size;
+  } block;
+
+  block loadFull();
+  void reset();
+  block next();
+  block prev();
+  block load(size_t from, size_t to);
+};
+
+class TargetEntry {
+public:
+  tinydir_file file;
+  std::string name;
+  std::string path;
+  bool isDir;
+  TargetEntry(tinydir_file *_file);
+  virtual ~TargetEntry();
+};
+
+class TargetFile : TargetEntry {
+public:
+  FileContentWalker contentWalker();
+};
+
+class TargetDir : TargetEntry {
+public:
+  enum WALK_STATUS { ONGOING, STOPPED, ABORTED, FAILED };
+  enum WALK_ACTION { STOP, CONTINUE, SKIP, ABORT };
+
+  using WalkAction_t =
+      std::function<WALK_ACTION(WALK_STATUS, const TargetEntry &)>;
+
+  void walk(WalkAction_t action);
+};
+
+class ThreadPool {
+  std::vector<std::thread> workers;
+  std::queue<std::function<void()>> task;
+  std::mutex queueMutex;
+  std::condition_variable condition;
+  bool stop;
+
+public:
+  ThreadPool(size_t maxCount);
+  ~ThreadPool();
+  enum STATUS { STOPPED, IDLE, DONE, ONGOING };
+  STATUS status;
+};
+
+// ----------------------------------------------------------
+// IMPL
+// ----------------------------------------------------------
+
+FileContentWalker::FileContentWalker(tinydir_file file) {
+  file = file;
+  std::ifstream fileStream(file.path, std::ios::binary | std::ios::ate);
+
+  fileSize = fileStream.tellg();
+  fileStream.seekg(0, std::ios::beg);
+
+  if (fileSize == 0) {
+    buf = new char[1];
+    buf[0] = '\0';
+  }
+};
+
+FileContentWalker::~FileContentWalker() {
+  if (fileStream.is_open()) {
+    fileStream.close();
+  }
+}
+
+FileContentWalker::block FileContentWalker::loadFull() {
+  if (buf)
+    delete[] buf;
+
+  fileStream.seekg(0, std::ios::beg);
+  buf = new char[fileSize];
+  fileStream.read(buf, fileSize);
+
+  return {buf, fileSize};
+};
+
+FileContentWalker::block FileContentWalker::next() {
+  if (!buf || this->pos >= this->fileSize || this->pos < 0 || fileSize == 0) {
+    return {nullptr, 0};
+  }
+
+  char *currPtr = &buf[pos];
+  fileStream.seekg(0, std::ios::beg);
+  size_t currentBlockSize = 0;
+  if (fileSize - pos < defaultBlockSize) {
+    currentBlockSize = fileSize - pos;
+  } else {
+    currentBlockSize = defaultBlockSize;
+  }
+
+  if (readReverse && this->pos > 0) {
+    pos -= currentBlockSize;
+  } else {
+    pos += currentBlockSize;
+  }
+
+  return {currPtr, currentBlockSize};
+};
+
+FileContentWalker::block FileContentWalker::prev() {
+  if (!buf || pos <= 0 || fileSize == 0)
+    return {nullptr, 0};
+
+  char *currPtr = &buf[pos];
+  size_t currentBlockSize = 0;
+  if (fileSize - pos < defaultBlockSize) {
+    currentBlockSize = fileSize - pos;
+  } else {
+    currentBlockSize = defaultBlockSize;
+  }
+
+  if (readReverse) {
+    if (pos < fileSize - 1) {
+      pos += currentBlockSize;
+    }
+  } else {
+    if (pos > 0) {
+      pos -= currentBlockSize;
+    }
+  }
+  return {currPtr, currentBlockSize};
+}
+
+void FileContentWalker::reset() {
+  if (readReverse)
+    pos = fileSize - 1;
+  else
+    pos = 0;
+};
+
+FileContentWalker::block FileContentWalker::load(size_t from, size_t to) {
+  
+  if (from < 0 || to > fileSize || to > fileSize || to <= 0)
+    return {nullptr, 0};
+
+  size_t length = to - from;
+  buf = new char[length];
+  fileStream.seekg(from, std::ios::beg);
+
+  if (!fileStream.read(buf, length)) {
+    delete[] buf;
+    return {nullptr, 0};
+  }
+
+  return {buf, length};
+}
+
+#endif

@@ -1,128 +1,47 @@
-#include <iostream>
-#include <lib-x.h>
 #include <lib.h>
-#include <tree_sitter/api.h>
-#include <ts_queries.h>
-#include <vector>
+#include <iostream>
+#include <mutex>
 
-using namespace std;
+int main() {
+    // 1. Initialize the ThreadPool
+    // We use hardware_concurrency to match the number of CPU cores
+    size_t threads = std::thread::hardware_concurrency();
+    ThreadPool pool(threads == 0 ? 4 : threads);
+    
+    // Mutex to synchronize console output so text doesn't overlap
+    std::mutex consoleMtx;
 
-extern "C" {
-const TSLanguage *tree_sitter_java(void);
-}
-
-class ParsedTSTree {
-public:
-  TSTree *tree;
-  string source;
-
-  ParsedTSTree(string source, TSTree *tree) {
-    this->tree = tree;
-    this->source = source;
-  }
-
-  ~ParsedTSTree() { ts_tree_delete(tree); }
-};
-
-class FileContentParser {
-public:
-  const TSLanguage *lang;
-  TSParser *tsParser;
-  TSTree *tsTree;
-  string content;
-
-  FileContentParser(const TSLanguage *lang) {
-    this->lang = lang;
-    this->tsParser = ts_parser_new();
-    ts_parser_set_language(this->tsParser, lang);
-  };
-
-  ParsedTSTree parseTree(string source) {
-    TSTree *tree = ts_parser_parse_string(this->tsParser, NULL, source.c_str(),
-                                          source.length());
-    return ParsedTSTree(source, tree);
-  };
-
- vector<TSNode> walkTree(ParsedTSTree* tree,
-                string filterQuery = "") {
-    uint32_t errorOffset;
-    TSQueryError error;
-    vector<TSNode> result;
-
-    TSQuery *query = ts_query_new(this->lang, filterQuery.c_str(),
-                                  filterQuery.length(), &errorOffset, &error);
-
-    TSQueryCursor *cursor = ts_query_cursor_new();
-
-    TSNode root = ts_tree_root_node(tree->tree);
-
-    ts_query_cursor_exec(cursor, query, root);
-    TSQueryMatch match;
-    while (ts_query_cursor_next_match(cursor, &match)) {
-      for (uint32_t i = 0; i < match.capture_count; i++) {
-        TSNode node = match.captures[i].node;
-        if (ts_node_is_null(node)) continue;
-        result.push_back(node);
-      }
-    }
-
-    ts_query_cursor_delete(cursor);
-    return result;
-  };
-
-  string nodeText(ParsedTSTree* tree, const TSNode &node) const {
-    uint32_t start = ts_node_start_byte(node);
-    uint32_t end = ts_node_end_byte(node);
-    return tree->source.substr(start, end - start);
-  }
-
-  ~FileContentParser() { ts_parser_delete(this->tsParser); };
-};
-
-struct FileContentWalker {
-  size_t nPreceding;
-  size_t nFollowing;
-  ENTRY_ACTION operator()(WALK_ENTRY_STATE walkState, TargetEntry *entry) {
-
-    if (entry->name.compare("resources") == 0)
-      return ENTRY_ACTION::SKIP;
-
-    if (entry->isFile) {
-
-      if (strcmp(entry->file.extension, "java") != 0)
-        return ENTRY_ACTION::CONTINUE;
-
-      TargetFile *file = dynamic_cast<TargetFile *>(entry);
-      if (file && file->loadFile()) {
-        while (file->hasNextBlock) {
-          TargetFile::Block block = file->next();
-          string cont(block.data, block.size);
-
-          FileContentParser parser(tree_sitter_java());
-          ParsedTSTree tree = parser.parseTree(cont);
-//          cout<<cont<<endl;
-          vector methods = parser.walkTree(&tree, ts::java::queries::METHOD_IDENTIFIER);
-
-          for (TSNode method : methods) {
-            cout << parser.nodeText(&tree, method) << endl;
-          }
+    // 2. Define the Action
+    // This lambda will be called for every file found
+    auto printAction = [&](DirWalker::STATUS status, tinydir_file file) {
+        if (status == DirWalker::OPENED && !file.is_dir) {
+            
+            // We enqueue a task to the pool to read and print the file
+            pool.enqueue([&consoleMtx, file]() {
+                    // Lock the console so one file prints at a time
+                    std::lock_guard<std::mutex> lock(consoleMtx);
+                    
+                    std::cout << "\n--- FILE: " << file.name << std::endl;
+            });
         }
-      }
+        return DirWalker::CONTINUE;
+    };
+
+    // 3. Start walking the current directory (".")
+    std::cout << "Scanning directory for files...\n";
+    DirWalker walker(".");
+    if (walker.isValid) {
+        // Recursive = false (just current dir)
+        walker.walk(pool, printAction);
+    } else {
+        std::cerr << "Failed to open directory.\n";
+        return 1;
     }
 
-    return ENTRY_ACTION::CONTINUE;
-  }
-};
+    // 4. Wait for all background tasks to finish
+    std::cout << "Waiting for threads to finish processing...\n";
+    pool.waitFinished();
 
-int main(int argc, char *argv[]) {
-
-  cout << "Hello world" << endl;
-
-  TargetDir dir("./samples");
-  cout << dir.name << endl;
-
-  FileContentWalker fileWalker;
-  cout << dir.walk(true, fileWalker) << endl;
-
-  return 0;
+    std::cout << "\nDone.\n";
+    return 0;
 }

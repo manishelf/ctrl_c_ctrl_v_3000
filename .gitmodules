@@ -10,3 +10,6 @@
 [submodule "samples/qtodo-spring-backend"]
 	path = samples/qtodo-spring-backend
 	url = https://github.com/manishelf/qtodo-spring-backend
+[submodule "deps/libgit2"]
+	path = deps/libgit2
+	url = https://github.com/libgit2/libgit2
