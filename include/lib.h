@@ -13,7 +13,9 @@
 #include <string>
 #include <thread>
 #include <tinydir.h>
+#include <tree_sitter/api.h>
 #include <vector>
+#include <map>
 
 // ----------------------------------------------------------
 // API
@@ -79,6 +81,8 @@ public:
   block load(size_t from, size_t to);
 };
 
+class FileWriter {};
+
 class DirWalker {
   tinydir_dir _dir;
 
@@ -87,16 +91,16 @@ public:
   bool isValid;
   size_t level = 0;
   bool recursive = false;
-  enum STATUS { 
-    OPENED,// file is opened 
+  enum STATUS {
+    OPENED,  // file is opened
     STOPPED, // Stoped the walk for current dir
     ABORTED, // Stoped the walk altogether
-    FAILED, // Failed to open file or dir
-    DONE 
+    FAILED,  // Failed to open file or dir
+    DONE
   };
-  enum ACTION { 
-    STOP, // stop walk in current dir 
-    CONTINUE, 
+  enum ACTION {
+    STOP, // stop walk in current dir
+    CONTINUE,
     SKIP, // skip opening child dir
     ABORT // stop the walk altogether
   };
@@ -108,7 +112,7 @@ public:
 
   ~DirWalker();
 
-  using WalkAction_t = std::function<ACTION(STATUS, tinydir_file file)>;
+  using WalkAction_t = std::function<ACTION(STATUS, tinydir_file)>;
 
   STATUS walk(WalkAction_t action);
 
@@ -120,7 +124,53 @@ private:
             std::shared_ptr<std::atomic<bool>> globalAbort);
 };
 
+class TsTree {};
 
+class TsEngine {
+private:
+  TSLanguage *lang;
+  TSParser *parser;
+  TSTree *currentTree;
+
+public:
+  
+  TsEngine(TSLanguage *lang);
+  ~TsEngine();
+
+  // take in the captures and return params to be used in the template
+  using Transformer_t =
+      std::function<std::vector<std::string>(std::map<std::string, TSNode>,TSTree, FileReader)>;
+
+  typedef struct {
+    std::string captureQuery; // The "From": Tree-sitter Query S-expression
+    TSQuery *query;
+    std::string resultTemplate; // The "To": How to rebuild the captured nodes; this may contain placeholders that can be replaced by the transformer result
+    Transformer_t transformer;
+  } Transformation;
+
+  typedef struct {
+    std::string ruleName;
+    TSRange range;
+    std::string original_text;
+    std::string transformed_text;
+    bool isInvalid = false;
+  } StagedChange;
+
+  void addRule(std::string ruleName, Transformation trans);
+
+  std::vector<StagedChange> transform(FileReader reader);
+
+  //returns valid changes and marks proposed changes that are invalid
+  std::vector<StagedChange> validateChanges(std::vector<StagedChange> proposedChanges, FileReader reader);
+
+  bool commitChanges(std::vector<StagedChange> changes, FileWriter writer);
+
+  TSNode findDeclaration(TSNode start, const std::string& identifier);
+
+private:
+  std::vector<Transformation> transformations;
+  std::vector<StagedChange> stagedTransforms;
+};
 
 // ----------------------------------------------------------
 // IMPL
@@ -340,7 +390,6 @@ void DirWalker::walk(ThreadPool &pool, WalkAction_t action,
 
       // create a anonlymous class that has action and file in constructor
       pool.enqueue([action, file, abortSignal]() {
-
         if (abortSignal->load())
           return;
 
