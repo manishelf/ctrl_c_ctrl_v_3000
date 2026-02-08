@@ -1,58 +1,48 @@
 #include <lib.h>
 #include<vector>
+#include <tree_sitter/api.h>
 
 using namespace std;
 
-DirWalker::ACTION printActionSync(DirWalker::STATUS status, tinydir_file file) {
- if (status == DirWalker::STATUS::OPENED && !file.is_dir) {
-    FileReader reader(file);
-    std::vector<FileReader::MatchResult> matches = reader.find("createQuery", false );
-    for(auto match : matches){
-      TSPoint startPoint = match.match.start_point;
-      TSPoint endPoint = match.match.start_point;
-      std::cout << file.path << "[" << startPoint.row << ":" << startPoint.column <<"]" <<std::endl;
-    };
+extern "C" {
+const TSLanguage *tree_sitter_java(void);
+}
+
+DirWalker::ACTION printActionSync(DirWalker::STATUS status, File file, void* payload) {
+
+  cout << file.name <<endl;
+
+ if (status == DirWalker::STATUS::OPENED && !file.isDir) {
+    if(file.ext == "java"){ 
+      FileReader reader(file);
+      TSTree *tree = ts_parser_parse((TSParser*)payload, NULL,
+      reader.asTsInput());
+
+      TSNode root = ts_tree_root_node(tree); 
+
+      cout << file.path << endl;
+      cout << ts_node_string(root) << endl; 
+    }
+
   }
   return DirWalker::ACTION::CONTINUE;
 }
 
-void multiThreaded(std::string path) {
-  size_t threads = std::thread::hardware_concurrency();
-  ThreadPool pool(threads == 0 ? 4 : threads);
-  std::mutex consoleMtx;
-
+void singleThreaded(std::string path, TSParser *parser) {
   DirWalker walker(path);
   if (walker.isValid()) {
     walker.recursive = true;
-    walker.walk(pool, printActionSync);
-  } else {
-    std::cerr << "Failed to open directory.\n";
-  }
-
-  std::cout << "Waiting for threads to finish processing...\n";
-  pool.waitFinished();
-
-  std::cout << "\nDone.\n";
-}
-
-
-void singleThreaded(std::string path) {
-  DirWalker walker(path);
-  if (walker.isValid()) {
-    walker.recursive = true;
-    walker.walk(printActionSync);
+    walker.walk(printActionSync, parser);
   } else {
     std::cerr << "Failed to open directory.\n";
   }
 };
 
 int main(int argc, char *argv[]) {
-  if(argc > 2){
-    cout << argv[2];
-    if(strcmp(argv[2], "-s") == 0)
-      singleThreaded(argv[1]);
-    else
-      multiThreaded(argv[1]);
+  if(argc > 1){
+     TSParser *parser = ts_parser_new();
+     ts_parser_set_language(parser, tree_sitter_java());
+     singleThreaded(argv[1], parser);
   }
   return 0;
 }
