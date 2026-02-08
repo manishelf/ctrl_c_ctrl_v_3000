@@ -20,12 +20,18 @@ set(USE_HTTP_PARSER "builtin" CACHE STRING "" FORCE)
 set(USE_GSSAPI OFF CACHE BOOL "" FORCE)        # Disable network auth
 set(USE_NTLMCLIENT OFF CACHE BOOL "" FORCE)    # Disable network auth
 
+set(USE_PCRE OFF CACHE BOOL "" FORCE) # for libgit2
+set(USE_REGEX OFF CACHE BOOL "" FORCE) # for libgit2
+
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE) 
 set(TREE_SITTER_BUILD_TESTS OFF CACHE BOOL "" FORCE) 
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-add_compile_options(-Wall -Wextra -ggdb)
+add_compile_options(
+  #-Wall 
+  #-Wextra 
+  -ggdb)
 
 # exec
 
@@ -36,11 +42,12 @@ add_executable(
 
 # deps
 
-add_subdirectory(deps/tree-sitter)
 add_subdirectory(deps/libgit2)
+add_subdirectory(deps/pcre2)
+add_subdirectory(deps/tree-sitter)
 add_subdirectory(deps/tree-sitter-parsers/tree-sitter-java)
 
-add_dependencies(ctrl_c_ctrl_v_3000 libgit2 tree-sitter tree-sitter-java)
+add_dependencies(ctrl_c_ctrl_v_3000 libgit2 pcre2-8  tree-sitter tree-sitter-java)
 
 find_package(Threads REQUIRED)
 
@@ -50,6 +57,7 @@ target_include_directories(ctrl_c_ctrl_v_3000 PUBLIC
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/deps/tinydir
     ${CMAKE_SOURCE_DIR}/deps/libgit2/include
+    ${CMAKE_SOURCE_DIR}/deps/pcre2/src
     ${CMAKE_SOURCE_DIR}/deps/tree-sitter/lib/include
     ${CMAKE_SOURCE_DIR}/deps/tree-sitter-parsers/tree-sitter-java/src
 )
@@ -57,8 +65,9 @@ target_include_directories(ctrl_c_ctrl_v_3000 PUBLIC
 # Link
 
 target_link_libraries(ctrl_c_ctrl_v_3000 PUBLIC
-  tree-sitter
   libgit2 libgit2package
+  pcre2-8
+  tree-sitter
   tree-sitter-java
   Threads::Threads
 )
