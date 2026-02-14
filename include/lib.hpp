@@ -4,8 +4,10 @@
 #include <algorithm>
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <condition_variable>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <functional>
 #include <iostream>
@@ -20,9 +22,12 @@
 #include <tinydir.h>
 #include <tree_sitter/api.h>
 #include <vector>
+#include <set>
 
 #define PCRE2_CODE_UNIT_WIDTH 8
 #include <pcre2.h>
+
+namespace fs = std::filesystem;
 
 // ----------------------------------------------------------
 // API
@@ -37,7 +42,10 @@ class ThreadPool {
   std::vector<std::thread> workers;
   std::queue<std::function<void()>> task;
   std::mutex queueMutex;
-  std::condition_variable condition;
+  std::condition_variable enqueueCondition;
+  std::mutex finishMutex;
+  std::condition_variable finishCondition;
+  
   bool stop;
   size_t maxCount;                    // std::thread::hardware_concurrency()
   std::atomic<size_t> activeTasks{0}; // Tracks pending + running tasks
@@ -54,22 +62,29 @@ public:
 
   // helper to block until all tasks are finished
   // main thread will yield until all threads are done
-  void waitFinished() {
-    while (activeTasks > 0) {
-      std::this_thread::yield(); // Give up CPU slice to workers
-    }
+  void waitUntilFinished() {
+     //while (activeTasks > 0) {
+      //std::this_thread::yield();
+    //}
+    std::unique_lock<std::mutex> lock(finishMutex);
+    finishCondition.wait(lock, [this]{
+        return activeTasks.load() == 0;
+    }); 
   }
 };
-// tinydir frees all ascociated files
-// when the dir closes
+
 class File {
 public:
-  std::string path;
+  std::string pathStr;
   std::string name;
   std::string ext;
   bool isDir;
   bool isReg;
   bool isValid;
+  size_t size;
+  fs::path path;
+  fs::file_status status;
+  fs::directory_entry dir_entry;
 
 #ifndef _MSC_VER
 #ifdef __MINGW32__
@@ -83,13 +98,15 @@ public:
   File(tinydir_file file);
   File();
   ~File();
+
+  void sync();
 };
 
-class FileSnapshot{
+struct FileSnapshot {
   File file;
-  std::string data;
-  bool isDirty;
   size_t lastModified;
+  std::string cont;
+  bool dirty;
 };
 
 class FileReader {
@@ -105,13 +122,14 @@ class FileReader {
 public:
   size_t level = 0;
   std::vector<size_t> rowOffsets;
-  size_t fileSize;
   size_t bufStart;
   size_t bufSize;
   size_t defaultBlockSize;
   bool readReverse;
+  bool snapShotMode; // disables fresh load and sync
   FileReader(File file, size_t blockSize = 4096);
   FileReader(std::string filePath, size_t blockSize = 4096);
+  FileReader(FileSnapshot snap, size_t blockSize = 4096);
   ~FileReader();
 
   bool isValid() { return _isValid; };
@@ -122,7 +140,7 @@ public:
     size_t size;
   } block;
 
-  block loadFull();
+  block sync();
   block load(size_t from, size_t to);
   std::string_view get(size_t from, size_t to);
   void reset();
@@ -143,6 +161,8 @@ public:
 
   TSPoint getPointFromByte(size_t byteOffset);
 
+  FileSnapshot snapshot();
+
   class iterator {
   public:
     using iterator_category = std::bidirectional_iterator_tag;
@@ -157,8 +177,8 @@ public:
 
     iterator &operator++() {
       pos += reader->defaultBlockSize;
-      if (pos >= reader->fileSize)
-        pos = reader->fileSize;
+      if (pos >= reader->file.size)
+        pos = reader->file.size;
       return *this;
     }
 
@@ -185,7 +205,7 @@ public:
 
   iterator begin() { return iterator(this, 0); }
 
-  iterator end() { return iterator(this, fileSize); }
+  iterator end() { return iterator(this, file.size); }
 
   std::reverse_iterator<iterator> rbegin() {
     return std::reverse_iterator<iterator>(end());
@@ -200,32 +220,47 @@ class FileWriter {
   File file;
   bool _isValid;
   std::ofstream oFileStream;
-  std::string buf;
+  FileSnapshot snap;
+
 public:
-  FileWriter(File file);
+  FileWriter(FileSnapshot snap);
   FileWriter(std::string path);
   ~FileWriter();
 
   bool isValid() { return _isValid; };
   File getFile() { return file; };
+  FileSnapshot getSnapshot() { return snap; };
 
-  bool backup(const std::string& suffix = ".bak"); // create a backup in same folder
+  std::vector<size_t> rowOffsets;
+
   bool commit(); // save buf to underling file
-  bool writeAtomic(const std::string& content); // overwrites entire file content
-  bool copy(std::string& path); // read to buf
-  bool flush(std::string& path); // create if non existing , will over write existing
+  bool
+  backup(const std::string &suffix = ".bak"); // create a backup in same folder
+  bool
+  flush(std::string &path); // create if non existing , will over write existing
 
-  FileWriter& append(std::string cont);
-  FileWriter& insert(size_t offset, std::string newCont);
-  FileWriter& write(size_t offset, char *newCont, size_t newContLen);
-  FileWriter& deleteRow(size_t row);
-  FileWriter& insertRow(size_t row, const std::string& line);
-  FileWriter& deleteCont(size_t from, size_t to);
-  FileWriter& replaceAll(std::string pattern, std::string templateOrResult);
-  FileWriter& replace(size_t nth_occ, std::string pattern,
-               std::string templateOrResult);
-  FileWriter& replaceFirst(std::string pattern, std::string templateOrResult);
-  FileWriter& replaceLast(std::string pattern, std::string templateOrResult);
+  FileWriter &copy(std::string &path); // load file cont to buf
+  FileWriter &append(std::string &cont);
+  FileWriter &insert(size_t offset, std::string &newCont);
+
+  // overwrite 
+  FileWriter &write(const std::string &content); // replace entire buf content
+  FileWriter &write(size_t offset, char *newCont, size_t newContLen);
+  FileWriter &write(size_t offset, std::string& cont);
+
+  FileWriter &deleteRow(size_t row);
+  FileWriter &insertRow(size_t row, const std::string &line);
+  FileWriter &deleteCont(size_t from, size_t to);
+  FileWriter &replaceAll(std::string pattern,
+                         std::string templateOrResult,
+                         size_t opt = PCRE2_SUBSTITUTE_GLOBAL | PCRE2_SUBSTITUTE_EXTENDED);
+  FileWriter &replace(std::string pattern,
+                      std::string templateOrResult,
+                      size_t nth_occ = 0,// 0 for first 1 for second and
+                                         //-1 for last, -2 for last second and so on
+                      size_t opt = PCRE2_SUBSTITUTE_GLOBAL | PCRE2_SUBSTITUTE_EXTENDED
+                      );  
+                                           
 };
 
 class DirWalker {
@@ -237,6 +272,8 @@ public:
   size_t level = 0;
   bool recursive = false;
   bool includeDotDir = false;
+  bool obeyGitIgnore = true;
+  std::set<std::string> ignoring;
   enum STATUS {
     QUEUING, // file queued for processing; may be skipped based on action
              // result
@@ -273,107 +310,25 @@ private:
             std::shared_ptr<std::atomic<bool>> globalAbort, void *payload);
 };
 
-class TsEngine {
-private:
-  TSLanguage *lang;
-  TSParser *parser;
-  TSTree *currentTree;
-
-public:
-  TsEngine(TSLanguage *lang);
-  ~TsEngine();
-
-  class Transformation {
-  public:
-    enum Type {
-      SIMPLE,
-      REGEX,
-      CST_QUERY,
-      SCRIPTED,
-      RENAME_FILE,
-      RENAME_DIR,
-      COMPOSITE
-    };
-
-    const std::string ruleName;
-    const Type type;
-
-    void *userData;
-
-    std::string searchPattern; // For SIMPLE/REGEX
-    std::string captureQuery;  // For CST_QUERY
-
-    using Hook_t = std::function<void(Transformation *)>;
-    Hook_t preHook;
-    Hook_t postHook;
-
-    // 1. Predicate: Decide if the match is valid before/after transforming
-    using Predicate_t = std::function<bool(
-        TsEngine *, std::map<std::string, TSNode>, FileReader)>;
-    Predicate_t filter;
-    Predicate_t validator;
-
-    // 2. Simple Param Returner: Return strings to fill $Key1, $Key2, etc.
-    using ParamTransformer_t = std::function<std::map<std::string, std::string>(
-        TsEngine *, std::map<std::string, TSNode>, FileReader)>;
-    ParamTransformer_t paramTransformer;
-
-    // 3. Raw Text Returner: Return the final string, bypassing templates
-    using RawTransformer_t = std::function<std::string(
-        TsEngine *, std::map<std::string, TSNode>, FileReader)>;
-    RawTransformer_t rawTransformer;
-
-    // 4. Multi-step: A list of sub-transformers to run in sequence
-    std::vector<std::shared_ptr<Transformation>> subRules;
-
-    // --- Result Template ---
-    std::string resultTemplate;
-
-    Transformation(std::string name, Type t) : ruleName(name), type(t) {}
-  };
-
-  class StandardTransformers {};
-
-  typedef struct {
-    std::string ruleName;
-    TSRange range;
-    std::string original_text;
-    std::string transformed_text;
-    bool isInvalid = false;
-  } StagedChange;
-
-  void addRule(Transformation trans);
-
-  void addTransaction(std::vector<Transformation> trans);
-
-  std::vector<StagedChange> transform(FileReader reader);
-
-  // returns valid changes and marks proposed changes that are invalid
-  std::vector<StagedChange>
-  validateChanges(std::vector<StagedChange> proposedChanges, FileReader reader);
-
-  bool commitChanges(std::vector<StagedChange> changes, FileWriter writer);
-
-  TSNode findDeclaration(TSNode start, const std::string &identifier);
-
-private:
-  std::vector<Transformation> transformations;
-  std::vector<StagedChange> stagedTransforms;
-};
-
 // ----------------------------------------------------------
 // IMPL
 // ----------------------------------------------------------
 
 File::File(std::string path) {
-  tinydir_file file;
-  if (tinydir_file_open(&file, path.c_str()) != -1) {
-    path = std::string(file.path);
-    name = std::string(file.name);
-    ext = std::string(file.extension);
-    isDir = file.is_dir == 1;
-    isReg = file.is_reg == 1;
-    _s = file._s;
+  dir_entry = fs::directory_entry(path);
+  this->pathStr = path;
+  if (dir_entry.exists()) {
+    this->path = dir_entry.path();
+    name = this->path.filename();
+    ext = this->path.extension();
+    isDir = dir_entry.is_directory();
+    isReg = dir_entry.is_regular_file();
+    status = dir_entry.status();
+    if(!isDir){
+      size = dir_entry.file_size();
+    }else{
+      size = 0;
+    }
     isValid = true;
   } else {
     isValid = false;
@@ -381,31 +336,58 @@ File::File(std::string path) {
 };
 
 File::File(tinydir_file file) {
-  path = std::string(file.path);
+  pathStr = std::string(file.path);
   name = std::string(file.name);
   ext = std::string(file.extension);
   isDir = file.is_dir == 1;
   isReg = file.is_reg == 1;
-  _s = file._s;
-  isValid = true;
+
+  dir_entry = fs::directory_entry(file.path);
+  path = dir_entry.path();
+  status = dir_entry.status();
+  if(!isDir){
+      size = dir_entry.file_size();
+    }else{
+      size = 0;
+    }
+  isValid = dir_entry.exists();
 };
 
-File::File() {};
+void File::sync() {
+  dir_entry.refresh();
+  status = dir_entry.status();
+  size = dir_entry.file_size();
+  isValid = dir_entry.exists();
+  isReg = dir_entry.is_regular_file();
+  path = dir_entry.path();
+}
 
+File::File() {};
 File::~File() {};
 
 // FileReader
+
+#define UPDATE_ROW_OFFSETS(data, len)                                          \
+  rowOffsets.clear();                                                          \
+  rowOffsets.push_back(0);                                                     \
+  for (size_t i = 0; i < (len); ++i) {                                         \
+    if ((data)[i] == '\n') {                                                   \
+      rowOffsets.push_back(i + 1);                                             \
+    }                                                                          \
+  }
+
 FileReader::FileReader(File file, size_t blockSize)
     : iFileStream(file.path, std::ios::binary | std::ios::ate) {
-  file = file;
+  this->file = file;
   defaultBlockSize = blockSize;
   _isValid = !file.isDir;
   readFileMetadata();
+  snapShotMode = false;
 };
 
 FileReader::FileReader(std::string filePath, size_t blockSize)
     : iFileStream(filePath.c_str(), std::ios::binary | std::ios::ate) {
-  file = File(filePath);
+  this->file = File(filePath);
   if (file.isValid) {
     _isValid = true && !file.isDir;
     defaultBlockSize = blockSize;
@@ -414,55 +396,49 @@ FileReader::FileReader(std::string filePath, size_t blockSize)
     defaultBlockSize = 0;
     _isValid = false;
   }
+  snapShotMode = false;
+};
+
+FileReader::FileReader(FileSnapshot snap, size_t blockSize){
+  snapShotMode = true;
+  file = snap.file;
+  buf = new char[snap.cont.length()];
+  std::memcpy(buf, snap.cont.data(), snap.cont.length());
+  _isValid = true;
+  defaultBlockSize = blockSize;
 };
 
 void FileReader::readFileMetadata() {
-  if (iFileStream.is_open()) {
-    iFileStream.clear();
-    iFileStream.seekg(0, std::ios::end);
-    std::streampos pos = iFileStream.tellg();
-    if (pos < 0) {
-      fileSize = 0;
-    } else {
-      fileSize = static_cast<size_t>(pos);
-    }
-    bufSize = fileSize;
+  if (iFileStream.is_open() && file.isValid && file.size != 0 ) {
+
+    bufSize = file.size;
     bufStart = 0;
 
     iFileStream.clear();
     iFileStream.seekg(0, std::ios::beg);
 
-    if (fileSize == 0) {
-      buf = new char[1];
-      buf[0] = '\0';
-    }
-    rowOffsets.reserve(fileSize / 50);
-    rowOffsets.push_back(0);   // row no 0
-                               //
-    const size_t size = 16384; // 16KB buffer
-    char buffer[size];
+    rowOffsets.reserve(file.size / 50);
+    rowOffsets.push_back(0); // row no 0
 
-    size_t totalOffset = 0;
-    while (iFileStream.read(buffer, size) || iFileStream.gcount() > 0) {
-      size_t bytesRead = iFileStream.gcount(); // "EOF" check
-      for (size_t i = 0; i < bytesRead; ++i) {
-        if (buffer[i] == '\n') {
-          rowOffsets.push_back(totalOffset + i + 1);
-        }
-      }
-      totalOffset += bytesRead;
-    }
+    buf = new char[file.size];
+    iFileStream.read(buf, file.size);
+    iFileStream.clear();
+    UPDATE_ROW_OFFSETS(buf, file.size);
   } else {
     bufSize = 0;
     bufStart = 0;
-    fileSize = 0;
     _isValid = false;
   }
 };
 
-FileReader::block FileReader::loadFull() {
+FileReader::block FileReader::sync() {
   if (!_isValid)
     return {nullptr, 0};
+
+  if(snapShotMode)
+    return {buf, bufSize};
+
+  file.sync();
 
   if (buf) {
     delete[] buf;
@@ -471,24 +447,28 @@ FileReader::block FileReader::loadFull() {
 
   iFileStream.clear();
   iFileStream.seekg(0, std::ios::beg);
-  buf = new char[fileSize];
+  buf = new char[file.size];
   bufStart = 0;
-  bufSize = fileSize;
-  iFileStream.read(buf, fileSize);
-  return {buf, fileSize};
+  bufSize = file.size;
+  iFileStream.read(buf, file.size);
+  iFileStream.clear();
+
+  UPDATE_ROW_OFFSETS(buf, file.size);
+
+  return {buf, file.size};
 };
 
 std::string_view FileReader::get(size_t from, size_t to) {
   if (!_isValid)
     return {};
 
-  if (from > fileSize || to > fileSize)
+  if (from > file.size || to > file.size)
     return {};
 
   size_t length = to - from;
 
   if (buf == nullptr || (from > 0 && from < bufStart) ||
-      (to < fileSize && to > bufSize + bufStart))
+      (to < file.size && to > bufSize + bufStart))
     if (load(from, to).cont == nullptr)
       return {};
 
@@ -499,7 +479,10 @@ FileReader::block FileReader::load(size_t from, size_t to) {
   if (!_isValid)
     return {nullptr, 0};
 
-  if (from > fileSize || to > fileSize || to == 0)
+  if(snapShotMode)
+    return {buf, bufSize};
+
+  if (from > file.size || to > file.size || to == 0)
     return {nullptr, 0};
 
   if (buf) {
@@ -527,10 +510,10 @@ FileReader::block FileReader::load(size_t from, size_t to) {
 FileReader::block FileReader::readBlockAt(size_t pos) {
   if (!_isValid)
     return {nullptr, 0};
-  if (pos >= fileSize)
+  if (pos >= file.size)
     return {nullptr, 0};
 
-  size_t size = std::min(defaultBlockSize, fileSize - pos);
+  size_t size = std::min(defaultBlockSize, file.size - pos);
 
   if (!buf || pos < bufStart || pos + size > bufStart + bufSize) {
     load(pos, pos + size);
@@ -552,13 +535,13 @@ const char *FileReader::tsRead(void *payload, uint32_t byte_index,
                                TSPoint position, uint32_t *bytes_read) {
   auto *reader = static_cast<FileReader *>(payload);
 
-  if (byte_index >= reader->fileSize) {
+  if (byte_index >= reader->file.size) {
     *bytes_read = 0;
     return nullptr;
   }
 
   size_t blockSize =
-      std::min(reader->defaultBlockSize, reader->fileSize - byte_index);
+      std::min(reader->defaultBlockSize, reader->file.size - byte_index);
 
   // Ensure buffer covers requested range
   if (!reader->buf || byte_index < reader->bufStart ||
@@ -585,16 +568,19 @@ std::vector<FileReader::MatchResult> FileReader::find(std::string pattern,
 
     pcre2_code *re = pcre2_compile(pcrePattern, PCRE2_ZERO_TERMINATED, opt,
                                    &errornumber, &erroroffset, NULL);
+
     if (re == NULL) {
       PCRE2_UCHAR buffer[256];
       pcre2_get_error_message(errornumber, buffer, sizeof(buffer));
       throw std::invalid_argument(
           "could not compile provided regex for fn find " + pattern + " - " +
-          file.path);
+          file.pathStr);
     }
 
+    pcre2_jit_compile(re, PCRE2_JIT_COMPLETE);
+
     if (buf == nullptr)
-      if (loadFull().cont == nullptr)
+      if (sync().cont == nullptr)
         return matches;
 
     matches = findWith(re, opt);
@@ -605,7 +591,7 @@ std::vector<FileReader::MatchResult> FileReader::find(std::string pattern,
   } else {
 
     if (buf == nullptr)
-      if (loadFull().cont == nullptr)
+      if (sync().cont == nullptr)
         return matches;
 
     std::string_view searchSpace(buf, bufSize);
@@ -639,7 +625,7 @@ std::vector<FileReader::MatchResult> FileReader::findWith(pcre2_code *re,
   std::vector<MatchResult> matches;
 
   if (buf == nullptr)
-    if (loadFull().cont == nullptr)
+    if (sync().cont == nullptr || bufSize == 0)
       return matches;
 
   PCRE2_SPTR subject = (PCRE2_SPTR)buf;
@@ -651,8 +637,17 @@ std::vector<FileReader::MatchResult> FileReader::findWith(pcre2_code *re,
 
   int rc = 0;
   PCRE2_SIZE startOffset = 0;
-  while ((rc = pcre2_match(re, subject, subject_length, startOffset, 0,
-                           match_data, NULL)) > 0) {
+  while (true) {
+    rc = pcre2_match(re, subject, subject_length, startOffset, opt,
+                           match_data, NULL);
+
+    if (rc == PCRE2_ERROR_NOMATCH)
+        break;
+
+    if (rc < 0){
+        pcre2_match_data_free(match_data);
+        throw std::runtime_error("PCRE2 match error");
+    }
     ovector = pcre2_get_ovector_pointer(match_data);
 
     MatchResult match;
@@ -682,8 +677,11 @@ std::vector<FileReader::MatchResult> FileReader::findWith(pcre2_code *re,
     }
 
     startOffset = ovector[1];
-    if (ovector[0] == ovector[1]) { // incase of zero length match
-      startOffset++;
+    if (ovector[0] == ovector[1]) { // 0 length matches can exist
+        if (startOffset < subject_length)
+            startOffset++;
+        else
+            break;
     }
 
     if (startOffset >= subject_length)
@@ -693,12 +691,21 @@ std::vector<FileReader::MatchResult> FileReader::findWith(pcre2_code *re,
   };
 
   pcre2_match_data_free(match_data);
+
   return matches;
 };
 
 TSPoint FileReader::getPointFromByte(size_t byteOffset) {
+
+  if (rowOffsets.empty())
+        return {0, static_cast<uint32_t>(byteOffset)};
+
   // Find the first row offset that is GREATER than our byte
   auto it = std::upper_bound(rowOffsets.begin(), rowOffsets.end(), byteOffset);
+
+  if (it == rowOffsets.begin()) {
+    return {0, static_cast<uint32_t>(byteOffset)};
+  }
 
   // The row number is the index of the element before 'it'
   uint32_t row = std::distance(rowOffsets.begin(), it) - 1;
@@ -709,14 +716,27 @@ TSPoint FileReader::getPointFromByte(size_t byteOffset) {
   return {row, col};
 }
 
+FileSnapshot FileReader::snapshot() {
+  file.sync();
+  sync();
+
+  FileSnapshot snap = {};
+  snap.file = file;
+  snap.cont = std::string(buf, file.size);
+  fs::file_time_type mtim = file.dir_entry.last_write_time();
+  snap.lastModified = mtim.time_since_epoch().count();
+  snap.dirty = false;
+  return snap;
+}
+
 FileReader::block FileReader::next() {
-  if (!buf || pos >= fileSize || fileSize == 0) {
+  if (!buf || pos >= file.size || file.size == 0) {
     return {nullptr, 0};
   }
 
   size_t currentBlockSize = 0;
-  if (fileSize - pos < defaultBlockSize) {
-    currentBlockSize = fileSize - pos;
+  if (file.size - pos < defaultBlockSize) {
+    currentBlockSize = file.size - pos;
   } else {
     currentBlockSize = defaultBlockSize;
   }
@@ -738,7 +758,7 @@ FileReader::block FileReader::next() {
 };
 
 FileReader::block FileReader::prev() {
-  if (!buf || pos <= 0 || fileSize == 0) {
+  if (!buf || pos <= 0 || file.size == 0) {
     return {nullptr, 0};
   }
 
@@ -753,7 +773,7 @@ FileReader::block FileReader::prev() {
   char *currPtr = buf + (pos - bufSize);
 
   if (readReverse) {
-    if (pos < fileSize - 1) {
+    if (pos < file.size - 1) {
       pos += currentBlockSize;
     }
   } else if (pos > 0) {
@@ -771,7 +791,7 @@ void FileReader::reset() {
   bufSize = 0;
   bufStart = 0;
   if (readReverse) {
-    pos = fileSize;
+    pos = file.size;
   } else {
     pos = 0;
   }
@@ -787,50 +807,286 @@ FileReader::~FileReader() {
 
 // FileWriter
 
-FileWriter::FileWriter(File f)
-    : oFileStream(file.path, std::ios::out | std::ios::trunc) {
-  file = f;
+FileWriter::FileWriter(FileSnapshot snap) {
+  this->snap = snap;
+  file = snap.file;
   _isValid = file.isValid;
 };
 
-FileWriter::FileWriter(std::string path)
-    : oFileStream(path, std::ios::out | std::ios::trunc) {
-  file = File(path);
+FileWriter::FileWriter(std::string path) {
+  FileReader tmp(path);
+  snap = tmp.snapshot();
+  file = tmp.getFile();
+  rowOffsets = tmp.rowOffsets;
   _isValid = file.isValid;
 };
 
 FileWriter::~FileWriter() {
-  if (oFileStream.is_open()) 
+  if (oFileStream.is_open())
     oFileStream.close();
 };
 
-/*FileWriter& FileWriter::write(std::string newCont) {
-  if (!oFileStream.is_open()) {
-    _isValid = false;
-  }else{
-    oFileStream.write(newCont.c_str(), newCont.length());
+bool FileWriter::backup(const std::string &suffix) {
+  std::string bkpPath;
+  bkpPath = file.pathStr + suffix;
+  if (fs::exists(bkpPath)) {
+    bkpPath =
+        file.pathStr + ".(" + std::to_string(snap.lastModified) + ")" + suffix;
   }
-  return *this;
+  std::ofstream bkp = std::ofstream(bkpPath, std::ios::out | std::ios::trunc);
+  bkp << snap.cont;
+
+  bkp.flush();
+  bool res = bkp.good();
+  bkp.close();
+  if (res) {
+    snap.dirty = false;
+  }
+  return res;
 };
 
-FileWriter& FileWriter::append(std::string cont){
+bool FileWriter::commit() {
+  std::ofstream bkp =
+      std::ofstream(file.pathStr, std::ios::out | std::ios::trunc);
+  bkp << snap.cont;
+
+  bkp.flush();
+  bool res = bkp.good();
+  bkp.close();
+  file.sync();
+  if (res) {
+    snap.dirty = false;
+  }
+  return res;
+};
+
+bool FileWriter::flush(std::string &path) {
+  std::ofstream target = std::ofstream(path, std::ios::out | std::ios::trunc);
+  target << snap.cont;
+  target.flush();
+  bool res = target.good();
+  target.close();
+  return res;
+};
+
+#define modifySnap                                                             \
+  snap.dirty = true;                                                           \
+  snap.lastModified =                                                          \
+      std::chrono::system_clock::now().time_since_epoch().count();             \
+  snap.file.size = snap.cont.length();                                         \
+  UPDATE_ROW_OFFSETS(snap.cont, snap.cont.length());                           \
   return *this;
+
+FileWriter &FileWriter::copy(std::string &sourcePath) {
+  if (!fs::exists(sourcePath)) {
+    throw std::invalid_argument(
+        "path to source file does not exist for: copy path-" + sourcePath);
+  }
+  FileReader tmp(sourcePath);
+  File curr = snap.file;
+  snap = tmp.snapshot();
+  snap.file = curr;
+  modifySnap
+};
+
+FileWriter &FileWriter::append(std::string &cont) {
+  snap.cont.append(cont);
+  modifySnap
 }
 
-bool commit();
-bool writeAtomic(const std::string& content);
-bool backup(const std::string& suffix);
+FileWriter &FileWriter::insert(size_t offset, std::string &slice) {
+  snap.cont.insert(offset, slice);
+  modifySnap
+};
 
-FileWriter& FileWriter::overWrite(size_t offset, std::string newCont);
-FileWriter& FileWriter::overWrite(size_t offset, char *newCont, size_t newContLen);
-FileWriter& FileWriter::deleteRow(size_t row);
-FileWriter& FileWriter::insertRow(size_t row, const std::string& line);
-FileWriter& FileWriter::deleteCont(size_t from, size_t to);
-FileWriter& FileWriter::replaceAll(std::string pattern, std::string templateOrResult);
-FileWriter& FileWriter::replace(size_t nth_occ, std::string pattern, std::string templateOrResult);
-FileWriter& FileWriter::replaceFirst(std::string pattern, std::string templateOrResult); 
-FileWriter& FileWriter::replaceLast(std::string pattern, std::string templateOrResult);
-*/
+FileWriter &FileWriter::write(const std::string &content) {
+  snap.cont = std::string(content);
+  modifySnap
+}
+
+FileWriter &FileWriter::write(size_t offset, char *newCont, size_t newContLen) {
+  snap.cont.erase(offset, newContLen);
+  snap.cont.insert(offset, newCont, newContLen);
+  modifySnap
+};
+
+FileWriter &FileWriter::write(size_t offset, std::string& cont){
+  snap.cont.erase(offset, cont.length());
+  snap.cont.insert(offset, cont);
+  modifySnap
+};
+
+FileWriter &FileWriter::deleteCont(size_t from, size_t to) {
+  snap.cont.erase(from, to - from);
+  modifySnap
+};
+
+FileWriter &FileWriter::deleteRow(size_t row) {
+  auto it1 = std::upper_bound(rowOffsets.begin(), rowOffsets.end(), row);
+  size_t row1Offset = std::distance(rowOffsets.begin(), it1) - 1;
+
+  auto it2 = std::upper_bound(rowOffsets.begin(), rowOffsets.end(), row + 1);
+  size_t row2Offset = std::distance(rowOffsets.begin(), it2) - 1;
+
+  snap.cont.erase(row1Offset, row2Offset);
+  modifySnap
+};
+
+FileWriter &FileWriter::insertRow(size_t row, const std::string &cont) {
+  bool hasEndl = cont[cont.length() - 1] == '\n';
+  auto it = std::upper_bound(rowOffsets.begin(), rowOffsets.end(), row);
+  size_t rowOffset = std::distance(rowOffsets.begin(), it) - 1;
+
+  snap.cont.insert(rowOffset, cont);
+  if (!hasEndl)
+    snap.cont.insert(rowOffset + cont.length(), '\n', 1);
+  modifySnap
+};
+
+FileWriter &FileWriter::replaceAll(std::string pattern,
+                                   std::string templateOrResult, size_t opt) {
+
+  int errornumber;
+  PCRE2_SIZE erroroffset;
+
+  // Compile pattern
+  pcre2_code *re = pcre2_compile((PCRE2_SPTR)pattern.c_str(), pattern.length(),
+                                 0, // default options
+                                 &errornumber, &erroroffset, nullptr);
+
+  if (!re) {
+    throw std::runtime_error("PCRE2 compilation failed at offset " +
+                             std::to_string(erroroffset));
+  }
+
+  pcre2_jit_compile(re, PCRE2_JIT_COMPLETE);
+
+  std::string output;
+  PCRE2_SIZE outLength = snap.cont.length();
+substitute:
+  outLength = outLength * 2; 
+  output = std::string(outLength, '\0');
+  // expands the template with captures and replcaes match
+  int rc = pcre2_substitute(
+                          re,
+                          (PCRE2_SPTR)snap.cont.c_str(),
+                          snap.cont.length(),
+                          0,
+                          opt,
+                          nullptr,
+                          nullptr,
+                          (PCRE2_SPTR)templateOrResult.c_str(),
+                          templateOrResult.length(),
+                          (PCRE2_UCHAR *)output.data(),
+                          &outLength);
+
+  if (rc == PCRE2_ERROR_NOMEMORY) {
+    // Resize buffer and retry
+    output.resize(outLength);
+    rc = pcre2_substitute(
+                          re,
+                          (PCRE2_SPTR)snap.cont.c_str(),
+                          snap.cont.length(),
+                          0,
+                          opt,
+                          nullptr,
+                          nullptr,
+                          (PCRE2_SPTR)templateOrResult.c_str(),
+                          templateOrResult.length(),
+                          (PCRE2_UCHAR *)output.data(),
+                          &outLength);
+  }
+
+  pcre2_code_free(re);
+
+  if (rc < 0) {
+    throw std::runtime_error("PCRE2 substitution failed");
+  }
+
+  output.shrink_to_fit();
+  snap.cont = std::move(output);
+
+  modifySnap
+};
+
+FileWriter& FileWriter::replace(std::string pattern,
+                                std::string templateOrResult,
+                                size_t nth,
+                                size_t opt){
+  FileReader snapReader(snap);
+  auto results = snapReader.find(pattern, true);
+
+  if (results.empty()) {
+    return *this;
+  }
+
+  nth %= results.size(); // -10 % 100 = 90 && 10 % 100 = 10 
+  auto target = results[nth]; 
+
+  size_t start_offset = target.match.start_byte;
+  size_t end_offset = target.match.end_byte;
+  
+  int errornumber;
+  PCRE2_SIZE erroroffset;
+
+  pcre2_code *re = pcre2_compile((PCRE2_SPTR)pattern.c_str(), pattern.length(),
+                                 0, 
+                                 &errornumber, &erroroffset, nullptr);
+
+  if (!re) {
+    throw std::runtime_error("PCRE2 compilation failed at offset " +
+                             std::to_string(erroroffset));
+  }
+
+
+  pcre2_jit_compile(re, PCRE2_JIT_COMPLETE);
+
+  std::string output;
+  PCRE2_SIZE outLength = templateOrResult.length();
+  outLength = outLength * 2; 
+  output = std::string(outLength, '\0');
+
+  int rc = pcre2_substitute(
+                          re,
+                          (PCRE2_SPTR)(snap.cont.c_str()+start_offset),
+                          end_offset - start_offset,
+                          0,
+                          opt,
+                          nullptr,
+                          nullptr,
+                          (PCRE2_SPTR)templateOrResult.c_str(),
+                          templateOrResult.length(),
+                          (PCRE2_UCHAR *)output.data(),
+                          &outLength);
+
+
+  if (rc == PCRE2_ERROR_NOMEMORY) {
+    // Resize buffer and retry
+    output.resize(outLength);
+    rc = pcre2_substitute(
+                          re,
+                          (PCRE2_SPTR)(snap.cont.c_str()+start_offset),
+                          end_offset - start_offset,
+                          0,
+                          opt,
+                          nullptr,
+                          nullptr,
+                          (PCRE2_SPTR)templateOrResult.c_str(),
+                          templateOrResult.length(),
+                          (PCRE2_UCHAR *)output.data(),
+                          &outLength);
+
+  }
+
+  pcre2_code_free(re);
+
+  if (rc < 0) {
+    throw std::runtime_error("PCRE2 substitution failed");
+  }
+
+  output.shrink_to_fit();
+  return write(start_offset, output);
+};
 
 // DirWalker
 DirWalker::DirWalker(tinydir_dir dir) {
@@ -883,7 +1139,7 @@ DirWalker::STATUS DirWalker::walk(WalkAction_t action, void *payload) {
     return FAILED;
   std::vector<File> myChildren = allChildren();
 
-  for (File file : myChildren) {
+  for (File& file : myChildren) {
 
     ACTION actRes = ACTION::CONTINUE;
 
@@ -924,7 +1180,7 @@ void DirWalker::walk(ThreadPool &pool, WalkAction_t action,
                      void *payload) {
 
   std::vector<File> myChildren = allChildren();
-  for (File file : myChildren) {
+  for (File& file : myChildren) {
 
     // If any thread previously returned ABORT, quit now
     if (abortSignal->load())
@@ -969,23 +1225,28 @@ void DirWalker::walk(ThreadPool &pool, WalkAction_t action,
 
 // ThreadPool
 ThreadPool::ThreadPool(size_t maxCount) {
-  maxCount = maxCount;
+  this->maxCount = maxCount;
   stop = false;
   for (size_t i = 0; i < maxCount; ++i) {
     workers.emplace_back([this] {
+        // constructor of Thread callable
       while (true) {
         std::function<void()> job;
         {
           std::unique_lock<std::mutex> lock(queueMutex);
           // Wait until there is a task or we are stopping
-          condition.wait(lock, [this] { return stop || !task.empty(); });
+          enqueueCondition.wait(lock, [this] { return stop || !task.empty(); });
           if (stop && task.empty())
             return;
           job = std::move(task.front());
           task.pop();
         }
         job();         // Execute the action
-        activeTasks--; // finished
+        if(activeTasks.fetch_sub(1) == 1){
+          // this was the last job
+          std::unique_lock<std::mutex> lock(finishMutex);
+          finishCondition.notify_all();
+        }
       }
     });
   }
@@ -995,7 +1256,7 @@ ThreadPool::~ThreadPool() {
     std::unique_lock<std::mutex> lock(queueMutex);
     stop = true;
   }
-  condition.notify_all(); // Wake up all threads to let them finish
+  enqueueCondition.notify_all(); // Wake up all threads to let them finish
   for (std::thread &worker : workers) {
     worker.join(); // Wait for every thread to finish its current job
   }
@@ -1007,7 +1268,7 @@ template <class F> void ThreadPool::enqueue(F &&f) {
     activeTasks++;
     task.emplace(std::forward<F>(f));
   }
-  condition.notify_one();
+  enqueueCondition.notify_one();
 }
 
 // Utils
