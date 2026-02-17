@@ -12,7 +12,6 @@
 #include <functional>
 #include <iostream>
 #include <iterator>
-#include <map>
 #include <mutex>
 #include <queue>
 #include <stdexcept>
@@ -96,10 +95,13 @@ public:
 
   File(std::string path);
   File(tinydir_file file);
-  File();
+  File(){};
   ~File();
 
   void sync();
+
+  static bool deleteFile(File& target); // deletes entry file and commits
+  static int deleteDir(File& target); // deletes entry dir and commits returns number of children deleted
 };
 
 struct FileSnapshot {
@@ -130,6 +132,8 @@ public:
   FileReader(File file, size_t blockSize = 4096);
   FileReader(std::string filePath, size_t blockSize = 4096);
   FileReader(FileSnapshot snap, size_t blockSize = 4096);
+  FileReader(const FileReader& copy);
+  FileReader(){};
   ~FileReader();
 
   bool isValid() { return _isValid; };
@@ -161,6 +165,7 @@ public:
 
   TSPoint getPointFromByte(size_t byteOffset);
 
+  // TODO: snapshot should be const
   FileSnapshot snapshot();
 
   class iterator {
@@ -229,7 +234,7 @@ public:
 
   bool isValid() { return _isValid; };
   File getFile() { return file; };
-  FileSnapshot getSnapshot() { return snap; };
+  const FileSnapshot getSnapshot() { return snap; };
 
   std::vector<size_t> rowOffsets;
 
@@ -284,10 +289,10 @@ public:
     DONE
   };
   enum ACTION {
-    STOP,     // stop walk in current dir
-    CONTINUE, // continue walk
-    SKIP,     // skip entering child dir
-    ABORT     // stop the walk altogether
+    STOP = -2,     // stop walk in current dir
+    ABORT = -1,      // stop the walk altogether
+    CONTINUE = 0, // continue walk
+    SKIP = 1,     // skip entering child dir
   };
 
   DirWalker(tinydir_dir dir);
@@ -310,9 +315,30 @@ private:
             std::shared_ptr<std::atomic<bool>> globalAbort, void *payload);
 };
 
+// should be thread local
+class TSEngine {
+  const TSLanguage* lang;
+  TSParser* parser;
+  TSEngine(const TSLanguage* lang);
+  FileReader fileReader;
+public:
+
+  static TSEngine& instance(const TSLanguage* lang);
+  ~TSEngine();
+  
+  void setReader(FileReader& fileReader); 
+
+  // parse the content
+  // return the tree?
+  // 
+};
+
 // ----------------------------------------------------------
 // IMPL
 // ----------------------------------------------------------
+#define LIB_IMPLEMENTATION
+
+#ifdef LIB_IMPLEMENTATION
 
 File::File(std::string path) {
   dir_entry = fs::directory_entry(path);
@@ -360,9 +386,18 @@ void File::sync() {
   isValid = dir_entry.exists();
   isReg = dir_entry.is_regular_file();
   path = dir_entry.path();
-}
+};
 
-File::File() {};
+bool File::deleteFile(File& target){
+  if(target.isDir) return false;
+  return fs::remove(target.path);
+};
+
+int File::deleteDir(File& target){
+  if(!target.isDir) return -1;
+  return fs::remove_all(target.path);
+};
+
 File::~File() {};
 
 // FileReader
@@ -399,7 +434,7 @@ FileReader::FileReader(std::string filePath, size_t blockSize)
   snapShotMode = false;
 };
 
-FileReader::FileReader(FileSnapshot snap, size_t blockSize){
+FileReader::FileReader(const FileSnapshot snap, size_t blockSize){
   snapShotMode = true;
   file = snap.file;
   buf = new char[snap.cont.length()];
@@ -407,6 +442,22 @@ FileReader::FileReader(FileSnapshot snap, size_t blockSize){
   _isValid = true;
   defaultBlockSize = blockSize;
 };
+
+FileReader::FileReader(const FileReader& copy){
+  this->iFileStream = std::ifstream(copy.file.pathStr);
+  this->file = copy.file;
+  this->_isValid = copy._isValid;
+  this->pos = copy.pos;
+  this->buf = new char[copy.bufSize];
+  memcpy(this->buf, copy.buf, copy.bufSize);
+  this->level =  copy.level;
+  this->rowOffsets = copy.rowOffsets;
+  this->bufStart = copy.bufStart;
+  this->bufSize = copy.bufSize;
+  this->defaultBlockSize = copy.defaultBlockSize;
+  this->readReverse = copy.readReverse;
+  this->snapShotMode = copy.snapShotMode; 
+}
 
 void FileReader::readFileMetadata() {
   if (iFileStream.is_open() && file.isValid && file.size != 0 ) {
@@ -717,6 +768,9 @@ TSPoint FileReader::getPointFromByte(size_t byteOffset) {
 }
 
 FileSnapshot FileReader::snapshot() {
+  
+  if(!file.isValid) return FileSnapshot();
+
   file.sync();
   sync();
 
@@ -848,6 +902,7 @@ bool FileWriter::backup(const std::string &suffix) {
 bool FileWriter::commit() {
   std::ofstream bkp =
       std::ofstream(file.pathStr, std::ios::out | std::ios::trunc);
+  snap.cont.shrink_to_fit();
   bkp << snap.cont;
 
   bkp.flush();
@@ -961,13 +1016,13 @@ FileWriter &FileWriter::replaceAll(std::string pattern,
 
   pcre2_jit_compile(re, PCRE2_JIT_COMPLETE);
 
-  std::string output;
-  PCRE2_SIZE outLength = snap.cont.length();
+  PCRE2_SIZE outLength = snap.cont.length()*2;
+  std::vector<PCRE2_UCHAR> buffer;
+  int rc = -1;
 substitute:
-  outLength = outLength * 2; 
-  output = std::string(outLength, '\0');
+  buffer.resize(outLength);
   // expands the template with captures and replcaes match
-  int rc = pcre2_substitute(
+  rc = pcre2_substitute(
                           re,
                           (PCRE2_SPTR)snap.cont.c_str(),
                           snap.cont.length(),
@@ -977,34 +1032,20 @@ substitute:
                           nullptr,
                           (PCRE2_SPTR)templateOrResult.c_str(),
                           templateOrResult.length(),
-                          (PCRE2_UCHAR *)output.data(),
+                          (PCRE2_UCHAR *)buffer.data(),
                           &outLength);
 
   if (rc == PCRE2_ERROR_NOMEMORY) {
-    // Resize buffer and retry
-    output.resize(outLength);
-    rc = pcre2_substitute(
-                          re,
-                          (PCRE2_SPTR)snap.cont.c_str(),
-                          snap.cont.length(),
-                          0,
-                          opt,
-                          nullptr,
-                          nullptr,
-                          (PCRE2_SPTR)templateOrResult.c_str(),
-                          templateOrResult.length(),
-                          (PCRE2_UCHAR *)output.data(),
-                          &outLength);
+    goto substitute;
   }
 
   pcre2_code_free(re);
-
+  
   if (rc < 0) {
     throw std::runtime_error("PCRE2 substitution failed");
   }
 
-  output.shrink_to_fit();
-  snap.cont = std::move(output);
+  snap.cont.assign(reinterpret_cast<char*>(buffer.data()), outLength);
 
   modifySnap
 };
@@ -1020,7 +1061,8 @@ FileWriter& FileWriter::replace(std::string pattern,
     return *this;
   }
 
-  nth %= results.size(); // -10 % 100 = 90 && 10 % 100 = 10 
+  // (a%b + b)%b for -10 % 100 = 90 && 10 % 100 = 10
+  nth = (nth % results.size() + results.size()) % results.size(); 
   auto target = results[nth]; 
 
   size_t start_offset = target.match.start_byte;
@@ -1041,12 +1083,12 @@ FileWriter& FileWriter::replace(std::string pattern,
 
   pcre2_jit_compile(re, PCRE2_JIT_COMPLETE);
 
-  std::string output;
-  PCRE2_SIZE outLength = templateOrResult.length();
-  outLength = outLength * 2; 
-  output = std::string(outLength, '\0');
-
-  int rc = pcre2_substitute(
+  PCRE2_SIZE outLength = templateOrResult.length() * 2;
+  std::vector<PCRE2_UCHAR> buffer;
+  int rc = -1;
+substitute:
+  buffer.resize(outLength);
+  rc = pcre2_substitute(
                           re,
                           (PCRE2_SPTR)(snap.cont.c_str()+start_offset),
                           end_offset - start_offset,
@@ -1056,26 +1098,12 @@ FileWriter& FileWriter::replace(std::string pattern,
                           nullptr,
                           (PCRE2_SPTR)templateOrResult.c_str(),
                           templateOrResult.length(),
-                          (PCRE2_UCHAR *)output.data(),
+                          (PCRE2_UCHAR *)buffer.data(),
                           &outLength);
 
 
   if (rc == PCRE2_ERROR_NOMEMORY) {
-    // Resize buffer and retry
-    output.resize(outLength);
-    rc = pcre2_substitute(
-                          re,
-                          (PCRE2_SPTR)(snap.cont.c_str()+start_offset),
-                          end_offset - start_offset,
-                          0,
-                          opt,
-                          nullptr,
-                          nullptr,
-                          (PCRE2_SPTR)templateOrResult.c_str(),
-                          templateOrResult.length(),
-                          (PCRE2_UCHAR *)output.data(),
-                          &outLength);
-
+    goto substitute;
   }
 
   pcre2_code_free(re);
@@ -1084,8 +1112,7 @@ FileWriter& FileWriter::replace(std::string pattern,
     throw std::runtime_error("PCRE2 substitution failed");
   }
 
-  output.shrink_to_fit();
-  return write(start_offset, output);
+  return write(start_offset, reinterpret_cast<char*>(buffer.data()), outLength);
 };
 
 // DirWalker
@@ -1271,6 +1298,27 @@ template <class F> void ThreadPool::enqueue(F &&f) {
   enqueueCondition.notify_one();
 }
 
+
+// TSEngine
+TSEngine::TSEngine(const TSLanguage* lang){
+    this->lang = lang;
+    TSParser *parser = ts_parser_new();
+    ts_parser_set_language(parser, lang);
+    this->parser = parser;
+};
+
+TSEngine::~TSEngine(){
+  ts_parser_delete(this->parser);
+};
+
+TSEngine& TSEngine::instance(const TSLanguage *lang){
+  thread_local TSEngine instance = TSEngine(lang);
+  return instance;
+};
+
+void TSEngine::setReader(FileReader& fileReader){
+};
+
 // Utils
 void Utils::process_tinydir_err(const std::string &context) {
 
@@ -1309,5 +1357,6 @@ void Utils::process_tinydir_err(const std::string &context) {
   }
   std::cerr << std::endl;
 }
+#endif // LIB_IMPLEMENTATION
 
 #endif
