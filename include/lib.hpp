@@ -102,6 +102,7 @@ public:
 
   static bool deleteFile(File& target); // deletes entry file and commits
   static int deleteDir(File& target); // deletes entry dir and commits returns number of children deleted
+  static bool rename(File& target, std::string name); // moves or renames
 };
 
 struct FileSnapshot {
@@ -131,7 +132,7 @@ public:
   bool snapShotMode; // disables fresh load and sync
   FileReader(File file, size_t blockSize = 4096);
   FileReader(std::string filePath, size_t blockSize = 4096);
-  FileReader(FileSnapshot snap, size_t blockSize = 4096);
+  FileReader(const FileSnapshot snap, size_t blockSize = 4096);
   FileReader(const FileReader& copy);
   FileReader(){};
   ~FileReader();
@@ -165,8 +166,7 @@ public:
 
   TSPoint getPointFromByte(size_t byteOffset);
 
-  // TODO: snapshot should be const
-  FileSnapshot snapshot();
+  const FileSnapshot snapshot();
 
   class iterator {
   public:
@@ -228,7 +228,7 @@ class FileWriter {
   FileSnapshot snap;
 
 public:
-  FileWriter(FileSnapshot snap);
+  FileWriter(const FileSnapshot snap);
   FileWriter(std::string path);
   ~FileWriter();
 
@@ -398,6 +398,15 @@ int File::deleteDir(File& target){
   return fs::remove_all(target.path);
 };
 
+bool File::rename(File& file, std::string name){
+  fs::rename(file.pathStr, name); 
+  file.path = fs::path(name);
+  file.pathStr = name;
+  file.dir_entry = fs::directory_entry(file.path);
+  file.sync();
+  return true;
+};
+
 File::~File() {};
 
 // FileReader
@@ -474,6 +483,7 @@ void FileReader::readFileMetadata() {
     buf = new char[file.size];
     iFileStream.read(buf, file.size);
     iFileStream.clear();
+
     UPDATE_ROW_OFFSETS(buf, file.size);
   } else {
     bufSize = 0;
@@ -767,7 +777,7 @@ TSPoint FileReader::getPointFromByte(size_t byteOffset) {
   return {row, col};
 }
 
-FileSnapshot FileReader::snapshot() {
+const FileSnapshot FileReader::snapshot() {
   
   if(!file.isValid) return FileSnapshot();
 
@@ -861,7 +871,7 @@ FileReader::~FileReader() {
 
 // FileWriter
 
-FileWriter::FileWriter(FileSnapshot snap) {
+FileWriter::FileWriter(const FileSnapshot snap) {
   this->snap = snap;
   file = snap.file;
   _isValid = file.isValid;

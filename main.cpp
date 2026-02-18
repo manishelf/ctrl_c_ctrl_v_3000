@@ -16,6 +16,9 @@ int main(int argc, char** argv) {
     std::string path = ".";
     DirWalker walker(path);
     walker.recursive = true;
-    walker.walk(replacex);
+    //walker.walk(replacex);
+    File file("sample12.txt");
+    file.rename(file, "sample.txt");
+    cout<< file.path << endl;
     return 0;
 }
