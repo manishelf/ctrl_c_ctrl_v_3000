@@ -19,7 +19,6 @@ int fn2(char** argv){
   ThreadPool pool;
   DirWalker walker(path);
   walker.recursive = true;
-  LibGit git; // handle lib_git_init;
 
   string from = ".setTupleTransformer((tuple, alias)->{ ... })";
   string to = ".setTupleTransformer((tuple, alias)->{ /* ... */ })";
@@ -45,12 +44,14 @@ int fn2(char** argv){
     FileWriter w(f);
     FileEditor edt; 
     TSEngine eng(lang);
+    thread_local LibGit git(f.repo);
 
     // needs to be local to thread for cursors to work correctly
     // mightbe a bug as TSQuery is immutable according to docs 
     thread_local TSQuery* q = eng.queryNew(qf);
 
     CSTTree t = eng.parse(w); 
+    //assert(t.getErrors().size() == 0);
 
     t.find(q, [&w, &edt](TSQueryMatch match) mutable{ 
       for(size_t i = 0; i < match.capture_count; i++ ){
@@ -62,7 +63,7 @@ int fn2(char** argv){
 
         edt.queue({FileEditor::OP::INSERT, {sb+1, sb+1+2}, {"", "/*"}});
         edt.queue({FileEditor::OP::INSERT, {eb-1, eb-1+2}, {"", "*/"}});
-        edt.queue({FileEditor::OP::PRINT_DIF, {w.rowOffsets[sp.row-1], w.rowOffsets[ep.row+1]}, {"TO", ""}});
+        //edt.queue({FileEditor::OP::PRINT_CHANGE, {w.rowOffsets[sp.row-1], w.rowOffsets[ep.row+1]}, {"TO", ""}});
       }
     });
     edt.queue({FileEditor::OP::SAVE});
@@ -78,9 +79,13 @@ int fn2(char** argv){
       cout << f.pathStr <<":" << row << ":"<< col << endl;
     }
 
+    if(errors.size() == 0){
+      git.add(f.path); 
+    }
+
     edt.reset();
   
-    return DirWalker::STOP;
+    return DirWalker::CONTINUE;
   });
 
   pool.waitUntilFinished();

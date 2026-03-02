@@ -1,4 +1,5 @@
 
+#include "git2/global.h"
 #include "git2/index.h"
 #include "git2/types.h"
 #include <algorithm>
@@ -36,6 +37,7 @@ namespace fs = std::filesystem;
 // ----------------------------------------------------------
 #ifndef LIB_H_
 #define LIB_H_
+
 class ThreadPool {
   std::vector<std::thread> workers;
   std::queue<std::function<void()>> task;
@@ -83,7 +85,7 @@ public:
   fs::file_status status;
   fs::directory_entry dir_entry;
 
-  git_repository* repo;
+  git_repository *repo;
 
   File(std::string path);
   File(fs::directory_entry entry);
@@ -122,7 +124,7 @@ public:
   std::vector<size_t> rowOffsets;
   size_t bufStart;
   size_t bufSize;
-  static constexpr size_t defaultBlockSize = 1024*1024;
+  static constexpr size_t defaultBlockSize = 1024 * 1024;
   size_t blockSize = defaultBlockSize;
   bool readReverse;
   bool snapShotMode; // disables fresh load and sync
@@ -131,7 +133,7 @@ public:
   FileReader(std::string filePath, size_t blockSize = defaultBlockSize);
   FileReader(const FileSnapshot snap, size_t blockSize = defaultBlockSize);
   FileReader(const FileReader &copy);
-  FileReader(){};
+  FileReader() {};
   ~FileReader();
 
   bool isValid() { return _isValid; };
@@ -219,9 +221,7 @@ public:
   }
 };
 
-TSPoint _getP(size_t byteOffset,
-                                  std::vector<size_t> rowOffsets);
-
+TSPoint _getP(size_t byteOffset, std::vector<size_t> rowOffsets);
 
 class FileWriter {
   File file;
@@ -278,22 +278,21 @@ public:
   OP(VALIDATE_CST)                                                             \
   OP(FLUSH)                                                                    \
   OP(SAVE)                                                                     \
-  OP(PRINT_DIF)                                                                \
+  OP(PRINT_CHANGE)                                                             \
   OP(MARK)                                                                     \
   OP(WRITE)                                                                    \
   OP(INSERT)                                                                   \
   OP(REPLACE)                                                                  \
-  OP(DELETE)                                                                   \
+  OP(DELETE)
 
-#define FOREACH_ERROR(ERR)  \
-  ERR(CONFLICT)             \
-  ERR(CST_ERROR)            \
-  ERR(CST_MISSING)          \
+#define FOREACH_ERROR(ERR)                                                     \
+  ERR(CONFLICT)                                                                \
+  ERR(CST_ERROR)                                                               \
+  ERR(CST_MISSING)
 
 class CSTTree;
 class FileEditor {
 public:
-
   enum OP {
 #define GENERATE_ENUM(ENUM) ENUM,
     FOREACH_OP(GENERATE_ENUM)
@@ -325,7 +324,7 @@ public:
   FileEditor();
   void queue(Edit e);
   void reset();
-  std::vector<Error> apply(CSTTree& original, FileWriter &writer);
+  std::vector<Error> apply(CSTTree &original, FileWriter &writer);
 
 private:
   std::vector<Edit> operations;
@@ -396,11 +395,12 @@ class CSTTree {
 private:
   TSTree *tree;
   std::string_view source;
-  TSEngine& parent;
+  TSEngine &parent;
+
 public:
   friend TSEngine;
 
-  CSTTree(TSTree *tree, std::string_view source, TSEngine& parent);
+  CSTTree(TSTree *tree, std::string_view source, TSEngine &parent);
   ~CSTTree();
 
   std::string sTree();
@@ -410,7 +410,7 @@ public:
   template <typename cb> void find(TSQuery *query, cb handle);
 
   bool validate(TSInputEdit edit, size_t insertL = 0, size_t delL = 0);
-  void edit(TSInputEdit edit, std::string_view& source);
+  void edit(TSInputEdit edit, std::string_view &source);
 
   std::vector<TSRange> getErrors();
 };
@@ -423,7 +423,7 @@ public:
   TSEngine(const TSLanguage *lang);
   ~TSEngine();
   const CSTTree parse(std::string_view source);
-  const CSTTree parse(const CSTTree& old, std::string_view modSource);
+  const CSTTree parse(const CSTTree &old, std::string_view modSource);
   const CSTTree parse(FileReader &reader);
   const CSTTree parse(FileWriter &writer);
 
@@ -434,9 +434,14 @@ public:
 };
 
 class LibGit {
+  git_repository *repo;
+  std::string root;
+  std::mutex gitMutex;
+
 public:
-  LibGit();
-  ~LibGit();
+  LibGit(git_repository *repo);
+
+  void add(fs::path &path);
 };
 
 #endif // LIB_H_
@@ -608,20 +613,21 @@ void FileReader::readFileMetadata() {
     size_t currentOffset = 0;
 
     while (iFileStream) {
-        iFileStream.read(buf, blockSize);
-        std::streamsize bytesRead = iFileStream.gcount();
+      iFileStream.read(buf, blockSize);
+      std::streamsize bytesRead = iFileStream.gcount();
 
-        if (bytesRead <= 0) break;
+      if (bytesRead <= 0)
+        break;
 
-        for (std::streamsize i = 0; i < bytesRead; ++i) {
-            if (buf[i] == '\n') {
-                rowOffsets.push_back(currentOffset + i + 1);
-            }
+      for (std::streamsize i = 0; i < bytesRead; ++i) {
+        if (buf[i] == '\n') {
+          rowOffsets.push_back(currentOffset + i + 1);
         }
+      }
 
-        bufStart = currentOffset;
-        bufSize = blockSize;
-        currentOffset += bytesRead;
+      bufStart = currentOffset;
+      bufSize = blockSize;
+      currentOffset += bytesRead;
     }
 
     iFileStream.read(buf, file.size);
@@ -903,9 +909,7 @@ std::vector<FileReader::MatchResult> FileReader::findWith(pcre2_code *re,
   return matches;
 };
 
-
-TSPoint _getP(size_t byteOffset,
-                                     std::vector<size_t> rowOffsets) {
+TSPoint _getP(size_t byteOffset, std::vector<size_t> rowOffsets) {
 
   if (rowOffsets.empty())
     return {0, static_cast<uint32_t>(byteOffset)};
@@ -1081,7 +1085,7 @@ bool FileWriter::backup(const std::string &suffix) {
   return res;
 };
 
-TSPoint FileWriter::getP(size_t byteOffset){
+TSPoint FileWriter::getP(size_t byteOffset) {
   return ::_getP(byteOffset, rowOffsets);
 };
 
@@ -1313,50 +1317,40 @@ void FileEditor::reset() {
   errors.clear();
 };
 
-std::vector<FileEditor::Error> FileEditor::apply(CSTTree& original, FileWriter &writer) {
+std::vector<FileEditor::Error> FileEditor::apply(CSTTree &original,
+                                                 FileWriter &writer) {
 
   sort(operations.begin(), operations.end(),
        [this](FileEditor::Edit x, FileEditor::Edit y) {
-         if (x.op == OP::PRINT_DIF)
-           return false;
-         if (y.op == OP::PRINT_DIF)
-           return true;
-
          size_t x1 = x.range[0];
          size_t x2 = x.range[1];
          size_t y1 = y.range[0];
          size_t y2 = y.range[1];
 
-
          TSRange r1;
          TSRange r2;
-         if((x1 == x2 == 0 || y1 == y2 == 0)
-             || (x1 >= y2 || y1 > x2)) {
+         if ((x1 == x2 == 0 || y1 == y2 == 0) || (x1 >= y2 || y1 > x2)) {
            return x.op > y.op;
-         }
-         else if(x1 <= y1 && y2 <= x2){
+         } else if (x1 <= y1 && y2 <= x2) {
            // x1 y1 y2 x2
            r1 = {(uint32_t)x1, (uint32_t)y1};
            r2 = {(uint32_t)y2, (uint32_t)x2};
-         }
-         else if(y1 <= x1 && x2 <= y2){
-           // y1 x1 x2 y2 
+         } else if (y1 <= x1 && x2 <= y2) {
+           // y1 x1 x2 y2
            r1 = {(uint32_t)y1, (uint32_t)x1};
            r2 = {(uint32_t)x2, (uint32_t)y2};
-         }
-         else if(x1 <= y1 && x2 <= y2){
+         } else if (x1 <= y1 && x2 <= y2) {
            // x1 y1 x2 y2
            r1 = {(uint32_t)x1, (uint32_t)y1};
            r2 = {(uint32_t)x2, (uint32_t)y2};
-         }
-         else if (y1 <= x1 && y2 <= x2) {
+         } else if (y1 <= x1 && y2 <= x2) {
            // y1 x1 y2 x2
            r1 = {(uint32_t)y1, (uint32_t)x1};
            r2 = {(uint32_t)y2, (uint32_t)x2};
          }
-  
-         errors.push_back({CONFLICT, r1 , x});
-         errors.push_back({CONFLICT, r2 , y});
+
+         errors.push_back({CONFLICT, r1, x});
+         errors.push_back({CONFLICT, r2, y});
 
          return x.op > y.op;
        });
@@ -1366,36 +1360,38 @@ std::vector<FileEditor::Error> FileEditor::apply(CSTTree& original, FileWriter &
     switch (edit.op) {
     case FileEditor::OP::INSERT: {
       TSInputEdit te = {
-        (unsigned int)edit.range[0],
-        (unsigned int)edit.range[0], 
-        (unsigned int)(edit.range[0] + edit.change[1].length()),
-        writer.getP(edit.range[0]),
-        writer.getP(edit.range[0]),
-        writer.getP(edit.range[0]),
-      }; 
+          (unsigned int)edit.range[0],
+          (unsigned int)edit.range[0],
+          (unsigned int)(edit.range[0] + edit.change[1].length()),
+          writer.getP(edit.range[0]),
+          writer.getP(edit.range[0]),
+          writer.getP(edit.range[0]),
+      };
       writer.insert(edit.range[0], edit.change[1]);
       auto change = std::string_view(writer.snapshot().cont);
       original.edit(te, change);
       break;
     }
     case FileEditor::OP::VALIDATE_CST: {
-      for(auto err : original.getErrors()){
+      for (auto err : original.getErrors()) {
         errors.push_back({CST_ERROR, err, edit});
       }
+      break;
     }
     case FileEditor::OP::PRINT_PATH: {
       auto p = writer.getP(edit.range[0]);
       std::cout << writer.snapshot().file.pathStr << ":" << p.row << ":"
-                << p.column << "\n";
+              << p.column << "\n";
       break;
     }
-    case FileEditor::OP::PRINT_DIF: {
+    case FileEditor::OP::PRINT_CHANGE: {
       auto p = writer.getP(edit.range[0]);
       std::cout << writer.snapshot().file.pathStr << ":" << p.row << ":"
                 << p.column << "\n";
       FileReader r(writer.snapshot());
       std::cout << "range: " << edit.range[0] << "," << edit.range[1] << "\n";
-      std::cout << "change: " << edit.change[0] << "," << edit.change[1] << "\n";
+      std::cout << "change: " << edit.change[0] << "," << edit.change[1]
+                << "\n";
       std::cout << ">>>>>>>>>>>" << "\n";
       std::cout << r.get(edit.range[0], edit.range[1]) << "\n";
       std::cout << "<<<<<<<<<<<" << "\n";
@@ -1405,8 +1401,7 @@ std::vector<FileEditor::Error> FileEditor::apply(CSTTree& original, FileWriter &
       writer.save();
       break;
     }
-    case FileEditor::OP::FLUSH:
-    {
+    case FileEditor::OP::FLUSH: {
       writer.flush(edit.change[1]);
       break;
     }
@@ -1437,10 +1432,12 @@ template <typename Payload, typename Action>
 DirWalker::STATUS DirWalker::walk(Action &&action, Payload &payload) {
   git_repository *repo = NULL;
 
+  git_libgit2_init();
   git_repository_open_ext(&repo, path.c_str(), GIT_REPOSITORY_OPEN_NO_SEARCH,
                           NULL);
   auto res = walk(repo, action, payload);
   git_repository_free(repo);
+  git_libgit2_shutdown();
   return res;
 };
 
@@ -1458,7 +1455,7 @@ DirWalker::STATUS DirWalker::walk(git_repository *repo, Action &&action,
 
   for (size_t i = 0; i < entries.size(); i++) {
     File file(entries[i]);
-    file.level = level; 
+    file.level = level;
     file.repo = repo;
 
     if (obeyGitIgnore && repo) {
@@ -1532,15 +1529,19 @@ void DirWalker::walk(ThreadPool &pool, Action &&action) {
 
 template <typename Payload, typename Action>
 void DirWalker::walk(ThreadPool &pool, Action &&action, Payload &payload) {
+
   std::shared_ptr<std::atomic<bool>> abortSignal =
       std::make_shared<std::atomic<bool>>(false);
-  git_repository *repo = NULL;
 
+  git_repository *repo = NULL;
+  git_libgit2_init();
   git_repository_open_ext(&repo, path.c_str(), GIT_REPOSITORY_OPEN_NO_SEARCH,
                           NULL);
   walk(repo, pool, action, abortSignal, payload);
+
   // TODO: issue with use after free for child
-  //git_repository_free(repo);
+  // git_repository_free(repo);
+  // git_libgit2_shutdown();
 }
 
 template <typename Payload, typename Action>
@@ -1678,7 +1679,8 @@ template <class F> void ThreadPool::enqueue(F &&f) {
 
 // CSTTree
 
-CSTTree::CSTTree(TSTree *tree, std::string_view source, TSEngine& parent) : source(source), parent(parent) {
+CSTTree::CSTTree(TSTree *tree, std::string_view source, TSEngine &parent)
+    : source(source), parent(parent) {
   this->tree = tree;
 };
 
@@ -1735,26 +1737,31 @@ template <typename cb> void CSTTree::find(TSQuery *query, cb handle) {
   ts_query_cursor_delete(cursor);
 }
 
-bool CSTTree::validate(const TSInputEdit ed, size_t insertL, size_t delL){
-   size_t size = source.size();
+bool CSTTree::validate(const TSInputEdit ed, size_t insertL, size_t delL) {
+  size_t size = source.size();
 
-   if (ed.start_byte > size) return false;
-   if (ed.old_end_byte > size) return false;
-   if (ed.new_end_byte < ed.start_byte) return false;
-   if (ed.old_end_byte < ed.start_byte) return false;
-   if(insertL != 0 || delL != 0){
-     if (ed.old_end_byte != ed.start_byte + delL) return false;
-     if (ed.new_end_byte != ed.start_byte + insertL) return false;
-   }
+  if (ed.start_byte > size)
+    return false;
+  if (ed.old_end_byte > size)
+    return false;
+  if (ed.new_end_byte < ed.start_byte)
+    return false;
+  if (ed.old_end_byte < ed.start_byte)
+    return false;
+  if (insertL != 0 || delL != 0) {
+    if (ed.old_end_byte != ed.start_byte + delL)
+      return false;
+    if (ed.new_end_byte != ed.start_byte + insertL)
+      return false;
+  }
 
-   if (!(ed.start_byte <= ed.old_end_byte &&
-         ed.start_byte <= ed.new_end_byte))
-       return false;
+  if (!(ed.start_byte <= ed.old_end_byte && ed.start_byte <= ed.new_end_byte))
+    return false;
 
-   return true;
+  return true;
 };
 
-void CSTTree::edit(const TSInputEdit ed, std::string_view& source){
+void CSTTree::edit(const TSInputEdit ed, std::string_view &source) {
   this->source = source;
   ts_tree_edit(tree, &ed);
   auto newTree = parent.parse(*this, source);
@@ -1763,7 +1770,7 @@ void CSTTree::edit(const TSInputEdit ed, std::string_view& source){
   newTree.tree = nullptr;
 }
 
-std::vector<TSRange> CSTTree::getErrors(){
+std::vector<TSRange> CSTTree::getErrors() {
   std::string q = R"(
       [
          (ERROR)
@@ -1771,19 +1778,15 @@ std::vector<TSRange> CSTTree::getErrors(){
       ] @syntax.error
   )";
 
-  TSQuery* sq = parent.queryNew(q);
+  TSQuery *sq = parent.queryNew(q);
   std::vector<TSRange> errors;
-  find(sq, [&errors](TSQueryMatch m) mutable{
-    for(size_t i = 0; i<m.capture_count; i++){
+  find(sq, [&errors](TSQueryMatch m) mutable {
+    for (size_t i = 0; i < m.capture_count; i++) {
       TSNode n = m.captures[i].node;
-      TSRange r = {
-        ts_node_start_point(n),
-        ts_node_end_point(n),
-        ts_node_start_byte(n),
-        ts_node_end_byte(n)
-      };
+      TSRange r = {ts_node_start_point(n), ts_node_end_point(n),
+                   ts_node_start_byte(n), ts_node_end_byte(n)};
       errors.push_back(r);
-    }    
+    }
   });
   ts_query_delete(sq);
   return errors;
@@ -1807,7 +1810,8 @@ const CSTTree TSEngine::parse(FileReader &reader) {
 
 const CSTTree TSEngine::parse(FileWriter &writer) {
   auto source = writer.snapshot().cont;
-  TSTree *tree = ts_parser_parse_string(parser, NULL, source.data(), source.length());
+  TSTree *tree =
+      ts_parser_parse_string(parser, NULL, source.data(), source.length());
   return CSTTree(tree, source, *this);
 }
 
@@ -1817,12 +1821,11 @@ const CSTTree TSEngine::parse(std::string_view source) {
   return CSTTree(tree, source, *this);
 };
 
-const CSTTree TSEngine::parse(const CSTTree& old, std::string_view source) {
+const CSTTree TSEngine::parse(const CSTTree &old, std::string_view source) {
   TSTree *tree =
       ts_parser_parse_string(parser, old.tree, source.data(), source.length());
   return CSTTree(tree, source, *this);
 };
-
 
 TSQuery *TSEngine::queryNew(std::string &queryExpr) {
   uint32_t errorOffset;
@@ -1840,8 +1843,25 @@ TSQuery *TSEngine::queryNew(std::string &queryExpr) {
   return query;
 };
 
-LibGit::LibGit() { assert(git_libgit2_init() >= 0); }
+// LibGit
 
-LibGit::~LibGit() { git_libgit2_shutdown(); };
+LibGit::LibGit(git_repository *repo) {
+  assert(repo != nullptr);
+  this->repo = repo;
+  root = git_repository_workdir(repo);
+}
+
+void LibGit::add(fs::path &path) {
+  git_index *index = nullptr;
+
+  fs::path relPath = fs::relative(path, root);
+
+  std::lock_guard<std::mutex> lock(gitMutex);
+  
+  git_repository_index(&index, this->repo);
+  git_index_add_bypath(index, relPath.c_str());
+  git_index_write(index);
+  git_index_free(index);
+};
 
 #endif // LIB_IMPLEMENTATION

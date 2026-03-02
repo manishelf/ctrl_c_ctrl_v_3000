@@ -1,3 +1,4 @@
+#include "git2/signature.h"
 #include <cctype>
 #include <git2.h>
 #include <iostream>
@@ -12,60 +13,9 @@ extern "C" {
 const TSLanguage *tree_sitter_java(void);
 }
 
-int fn1() {
-
-  string p = "example.java";
-
-  string qf = R"(
-              (method_invocation
-                  (identifier)
-               arguments: (argument_list
-                 (lambda_expression
-                   parameters: (inferred_parameters)
-                   body: (block) @lamda_block)))
-                          )";
-
-  const TSLanguage *lang = tree_sitter_java();
-  TSQuery* q = TSEngine::queryNew(lang, qf);
- 
-    FileReader r(p);
-    FileWriter w(r.snapshot());
-    FileEditor edt;
-
-    TSEngine eng(lang);
-    CSTTree t = eng.parse(r); 
-
-    assert(t.getErrors().size() == 0);
-
-    t.find(q, [&w, &edt, &r](TSQueryMatch match) mutable{ 
-      for(size_t i = 0; i < match.capture_count; i++ ){
-        TSNode n = match.captures[i].node;
-        auto sb = ts_node_start_byte(n);
-        auto eb = ts_node_end_byte(n);
-        auto sp = ts_node_start_point(n);
-        auto ep = ts_node_end_point(n);
-        string comStart = "/*";
-        string comEnd = "*/";
-        edt.queue({FileEditor::OP::INSERT, {sb+1, sb+1+2}, {"", comStart}});
-        edt.queue({FileEditor::OP::INSERT, {eb-1, eb-1+2}, {"", comEnd}});
-        edt.queue({FileEditor::OP::PRINT_DIF, {sb-100, eb+100}, {"TO", ""}});
-      }
-    });
-
-    edt.queue({FileEditor::OP::SAVE, {}, {}});
-
-    for(auto err : edt.apply(t, w)){
-      cout << "ERROR:" << err.e << edt.OP_STR[err.edit.op]
-       <<"-" << err.edit.range[0] <<"," << err.edit.range[1] << endl;
-    };
-
-    edt.reset();
-  
-  return 0;
-}
-
 int fn2(char** argv){
-  std::string path = argv[1];
+  
+  string path = argv[1];
   ThreadPool pool;
   DirWalker walker(path);
   walker.recursive = true;
@@ -76,7 +26,7 @@ int fn2(char** argv){
 
   string qf = R"(
               (method_invocation
-                  (identifier)
+                  (identifier) 
                arguments: (argument_list
                  (lambda_expression
                    parameters: (inferred_parameters)
@@ -84,45 +34,54 @@ int fn2(char** argv){
                           )";
 
   const TSLanguage *lang = tree_sitter_java();
-  TSQuery* q = TSEngine::queryNew(lang, qf);
-  walker.walk(pool, [lang, q](DirWalker::STATUS s, File f) {
+
+  walker.walk([lang, &qf](DirWalker::STATUS s, File f) {
+
+    if(s ==DirWalker::QUEUING) return DirWalker::CONTINUE;
+
     if(f.ext != ".java")
       return DirWalker::CONTINUE;
 
-    FileReader r(f);
-    FileWriter w(r.snapshot());
-    FileEditor edt;
-
+    FileWriter w(f);
+    FileEditor edt; 
     TSEngine eng(lang);
-    CSTTree t = eng.parse(r); 
-    t.find(q, [&w, &edt, &r](TSQueryMatch match) mutable{ 
+
+    // needs to be local to thread for cursors to work correctly
+    // mightbe a bug as TSQuery is immutable according to docs 
+    thread_local TSQuery* q = eng.queryNew(qf);
+
+    CSTTree t = eng.parse(w); 
+
+    t.find(q, [&w, &edt](TSQueryMatch match) mutable{ 
       for(size_t i = 0; i < match.capture_count; i++ ){
         TSNode n = match.captures[i].node;
         auto sb = ts_node_start_byte(n);
         auto eb = ts_node_end_byte(n);
         auto sp = ts_node_start_point(n);
         auto ep = ts_node_end_point(n);
-        string comStart = "/*";
-        string comEnd = "*/";
-        edt.queue({FileEditor::OP::INSERT, {sb+1, sb+1+2}, {"", comStart}});
-        edt.queue({FileEditor::OP::INSERT, {eb-1, eb-1+2}, {"", comEnd}});
-        edt.queue({FileEditor::OP::PRINT_DIF, {sb-100, eb+100}, {"TO", ""}});
+
+        edt.queue({FileEditor::OP::INSERT, {sb+1, sb+1+2}, {"", "/*"}});
+        edt.queue({FileEditor::OP::INSERT, {eb-1, eb-1+2}, {"", "*/"}});
+        edt.queue({FileEditor::OP::PRINT_DIF, {w.rowOffsets[sp.row-1], w.rowOffsets[ep.row+1]}, {"TO", ""}});
       }
     });
+    edt.queue({FileEditor::OP::SAVE});
+    edt.queue({FileEditor::OP::VALIDATE_CST, {},{f.pathStr}});
 
-    edt.queue({FileEditor::OP::SAVE, {}, {}});
+    auto errors = edt.apply(t, w);
 
-    for(auto err : edt.apply(t, w)){
-      cout << "ERROR:" << err.e << edt.OP_STR[err.edit.op]
-        << err.edit.range[0] << err.edit.range[1] << endl;
-    };
+    for(auto err : errors ){
+      size_t row , col;
+      row = err.range.start_point.row;
+      col = err.range.start_point.column;
+      cout << "ERROR:" << edt.ERROR_STR[err.e] << endl;
+      cout << f.pathStr <<":" << row << ":"<< col << endl;
+    }
 
     edt.reset();
   
     return DirWalker::CONTINUE;
   });
-
-  ts_query_delete(q);
 
   pool.waitUntilFinished();
 
@@ -131,6 +90,6 @@ int fn2(char** argv){
 
 int main(int argc, char** argv){
 
-  return fn1();
+  return fn2(argv);
 }
 
