@@ -8,6 +8,7 @@
 #include <cerrno>
 #include <chrono>
 #include <condition_variable>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -311,8 +312,7 @@ public:
 
   struct Edit {
     OP op;
-    // [s, e)
-    size_t range[2] = {0, 0};
+    TSRange range;
     std::string change[2];
     pcre2_code *rc;
   };
@@ -325,10 +325,13 @@ public:
   void queue(Edit e);
   void reset();
   std::vector<Error> apply(CSTTree &original, FileWriter &writer);
+  
 
 private:
   std::vector<Edit> operations;
   std::vector<Error> errors;
+
+  static TSPoint getNewEndPoint(const Edit& edit);
 };
 
 class DirWalker {
@@ -406,11 +409,12 @@ public:
   std::string sTree();
   std::string asQuery();
   void getQueryForNode(TSNode node, std::string &query, size_t level = 0);
+  std::string getText(TSNode n);
 
   template <typename cb> void find(TSQuery *query, cb handle);
 
   bool validate(TSInputEdit edit, size_t insertL = 0, size_t delL = 0);
-  void edit(TSInputEdit edit, std::string_view &source);
+  void edit(TSInputEdit edit, const std::string &source);
 
   std::vector<TSRange> getErrors();
 };
@@ -426,6 +430,8 @@ public:
   const CSTTree parse(const CSTTree &old, std::string_view modSource);
   const CSTTree parse(FileReader &reader);
   const CSTTree parse(FileWriter &writer);
+
+  static TSRange getRange(TSNode n);
 
   // TSQuery is not thread safe although it is immutable
   // unpredictable cursors
@@ -1317,15 +1323,39 @@ void FileEditor::reset() {
   errors.clear();
 };
 
+TSPoint FileEditor::getNewEndPoint(const Edit &edit){
+
+    TSPoint p = edit.range.start_point;
+
+    // DELETE → nothing inserted
+    if (edit.op == OP::DELETE) {
+        return p;
+    }
+
+    const std::string& change = edit.change[1];
+    if(change.empty()) return p;
+
+    for (char c : change) {
+        if (c == '\n') {
+            p.row += 1;
+            p.column = 0;
+        } else {
+            p.column += 1;
+        }
+    }
+
+    return p;
+};
+
 std::vector<FileEditor::Error> FileEditor::apply(CSTTree &original,
                                                  FileWriter &writer) {
 
   sort(operations.begin(), operations.end(),
        [this](FileEditor::Edit x, FileEditor::Edit y) {
-         size_t x1 = x.range[0];
-         size_t x2 = x.range[1];
-         size_t y1 = y.range[0];
-         size_t y2 = y.range[1];
+         size_t x1 = x.range.start_byte;
+         size_t x2 = x.range.end_byte;
+         size_t y1 = y.range.start_byte;
+         size_t y2 = y.range.end_byte;
 
          TSRange r1;
          TSRange r2;
@@ -1360,16 +1390,29 @@ std::vector<FileEditor::Error> FileEditor::apply(CSTTree &original,
     switch (edit.op) {
     case FileEditor::OP::INSERT: {
       TSInputEdit te = {
-          (unsigned int)edit.range[0],
-          (unsigned int)edit.range[0],
-          (unsigned int)(edit.range[0] + edit.change[1].length()),
-          writer.getP(edit.range[0]),
-          writer.getP(edit.range[0]),
-          writer.getP(edit.range[0]),
+          edit.range.start_byte,
+          edit.range.start_byte,
+          edit.range.start_byte + (uint32_t)edit.change[1].length(),
+          edit.range.start_point,
+          edit.range.end_point,
+          getNewEndPoint(edit),
       };
-      writer.insert(edit.range[0], edit.change[1]);
-      auto change = std::string_view(writer.snapshot().cont);
-      original.edit(te, change);
+      writer.insert(edit.range.start_byte, edit.change[1]);
+      original.edit(te, writer.snapshot().cont);
+      break;
+    }
+    case FileEditor::OP::DELETE:
+    {
+      TSInputEdit te = {
+          edit.range.start_byte,
+          edit.range.end_byte,
+          edit.range.start_byte,
+          edit.range.start_point,
+          edit.range.end_point,
+          getNewEndPoint(edit),
+      };
+      writer.deleteCont(edit.range.start_byte, edit.range.end_byte);
+      original.edit(te, writer.snapshot().cont);
       break;
     }
     case FileEditor::OP::VALIDATE_CST: {
@@ -1379,21 +1422,19 @@ std::vector<FileEditor::Error> FileEditor::apply(CSTTree &original,
       break;
     }
     case FileEditor::OP::PRINT_PATH: {
-      auto p = writer.getP(edit.range[0]);
-      std::cout << writer.snapshot().file.pathStr << ":" << p.row << ":"
-              << p.column << "\n";
+      std::cout << writer.snapshot().file.pathStr << ":" << edit.range.start_point.row << ":" << edit.range.start_point.column << "\n";
       break;
     }
     case FileEditor::OP::PRINT_CHANGE: {
-      auto p = writer.getP(edit.range[0]);
-      std::cout << writer.snapshot().file.pathStr << ":" << p.row << ":"
-                << p.column << "\n";
+      auto pOld = edit.range.start_point;
+      auto pNew = getNewEndPoint(edit);
       FileReader r(writer.snapshot());
-      std::cout << "range: " << edit.range[0] << "," << edit.range[1] << "\n";
-      std::cout << "change: " << edit.change[0] << "," << edit.change[1]
-                << "\n";
+
+      std::cout << writer.snapshot().file.pathStr << ":" << pOld.row << ":" << pOld.column << "\n";
+      std::cout << "change: " << edit.change[0] << " -> " << edit.change[1] << "\n";
+      std::cout << "at: " << pOld.row << ":" << pOld.column << " - " << pNew.row << ":" << pNew.column << "\n";
       std::cout << ">>>>>>>>>>>" << "\n";
-      std::cout << r.get(edit.range[0], edit.range[1]) << "\n";
+      std::cout << r.get(edit.range.start_byte, edit.range.end_byte) << "\n";
       std::cout << "<<<<<<<<<<<" << "\n";
       break;
     }
@@ -1695,7 +1736,7 @@ std::string CSTTree::sTree() {
 };
 
 void CSTTree::getQueryForNode(TSNode node, std::string &query, size_t level) {
-  // query.append(std::string(level, '\t'));
+  query.append(std::string(level, '\t'));
   query.append("(");
   query.append(ts_node_type(node));
 
@@ -1705,16 +1746,22 @@ void CSTTree::getQueryForNode(TSNode node, std::string &query, size_t level) {
     TSNode child = ts_node_child(node, i);
     if (!ts_node_is_named(child))
       continue;
-    // query.append("\n");
+    query.append("\n");
     getQueryForNode(child, query, level + 1);
-    // query.append(std::string(level, '\t'));
+    query.append(std::string(level, '\t'));
   }
 
   query.append(")");
   // query.append("@");
   // query.append(ts_node_type(node));
   // query.append("_"+std::to_string(level));
-  // query.append("\n");
+  query.append("\n");
+};
+
+std::string CSTTree::getText(TSNode n){
+  auto sb = ts_node_start_byte(n);
+  auto eb = ts_node_end_byte(n);
+  return std::string(source.substr(sb, eb));
 };
 
 std::string CSTTree::asQuery() {
@@ -1761,7 +1808,7 @@ bool CSTTree::validate(const TSInputEdit ed, size_t insertL, size_t delL) {
   return true;
 };
 
-void CSTTree::edit(const TSInputEdit ed, std::string_view &source) {
+void CSTTree::edit(const TSInputEdit ed, const std::string &source) {
   this->source = source;
   ts_tree_edit(tree, &ed);
   auto newTree = parent.parse(*this, source);
@@ -1841,6 +1888,16 @@ TSQuery *TSEngine::queryNew(std::string &queryExpr) {
   assert(error == TSQueryErrorNone);
 
   return query;
+};
+
+TSRange TSEngine::getRange(TSNode n){
+  TSRange r = {
+     ts_node_start_point(n),
+     ts_node_end_point(n),
+     ts_node_start_byte(n),
+     ts_node_end_byte(n)
+  };
+  return r;
 };
 
 // LibGit

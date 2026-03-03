@@ -26,7 +26,8 @@ int fn2(char** argv){
 
   string qf = R"(
               (method_invocation
-                  (identifier) 
+                  (identifier) @method_name
+                  (#eq? @method_name "setTupleTransformer")
                arguments: (argument_list
                  (lambda_expression
                    parameters: (inferred_parameters)
@@ -54,6 +55,9 @@ int fn2(char** argv){
 
     t.find(q, [&w, &edt](TSQueryMatch match) mutable{ 
       for(size_t i = 0; i < match.capture_count; i++ ){
+        // method name
+        if(match.captures[i].index == 0) continue;
+
         TSNode n = match.captures[i].node;
         auto sb = ts_node_start_byte(n);
         auto eb = ts_node_end_byte(n);
