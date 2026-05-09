@@ -38,7 +38,7 @@ public:
 
   LuaExecutor();
   ~LuaExecutor();
-  void exec(std::string path);
+  void exec(std::string pathOrChunk, bool fromFile = false);
 
   void watchAndExecThreaded(const std::string& path, int pollIntervalMs = 1000);
   void joinWatcher();

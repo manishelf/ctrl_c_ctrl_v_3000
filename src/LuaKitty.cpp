@@ -36,25 +36,44 @@ namespace copypasta{
     updateLuaArgs();
   }
 
-  void LuaExecutor::exec(std::string path){
-    INFO("LuaExecutor exec - " << path);
+  void LuaExecutor::exec(std::string pathOrChunk, bool fromFile){
+
     lua_getglobal(L, "debug");
     lua_getfield(L, -1, "traceback");
+    lua_remove(L, -2);
 
     int errFuncIndex = lua_gettop(L);
 
-    // Load file
-    if (luaL_loadfile(L, path.c_str()) != LUA_OK) {
+    int status;
+
+    if(fromFile){
+      INFO("LuaExecutor exec from file - " << pathOrChunk);
+
+      if (pathOrChunk == "-") {
+        // from stdin
+        status = luaL_loadfile(L, NULL);
+      } else {
+        // from file
+        status = luaL_loadfile(L, pathOrChunk.c_str());
+      }
+    }else {
+      INFO("LuaExecutor exec from chunk");
+      DEBUG_FULL(" chunk - ");
+      DEBUG_FULL(pathOrChunk);
+      status = luaL_loadbuffer( L, pathOrChunk.c_str(), pathOrChunk.size(), "LuaExecutor: from chunk");
+    }
+
+    if (status != LUA_OK) {
       std::string err = lua_tostring(L, -1);
       lua_pop(L, 1);
-      throw std::runtime_error("Lua load error in " + path + ":\n" + err);
+      throw std::runtime_error("Lua load error in \n" + pathOrChunk + "\n" + err);
     }
 
     // Call with traceback
     if (lua_pcall(L, 0, LUA_MULTRET, errFuncIndex) != LUA_OK) {
       std::string err = lua_tostring(L, -1);
       lua_pop(L, 1);
-      throw std::runtime_error("Lua runtime error in " + path + ":\n" + err);
+      throw std::runtime_error("Lua runtime error in " + pathOrChunk + ":\n" + err);
     }
 
     // Clean up error handler
@@ -63,23 +82,56 @@ namespace copypasta{
 
   void LuaExecutor::watchAndExec(const std::string& path, int pollIntervalMs) {
     watcherRunning = true;
-    fs::file_time_type lastWrite = fs::last_write_time(path);
-    bool execDoneOnce = false;
 
-    while (watcherRunning) {
-      std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
-      auto nowWrite = fs::last_write_time(path);
-      if (nowWrite != lastWrite || !execDoneOnce) {
-        lastWrite = nowWrite;
+    if (path == "-") {
+      // use with rlwrap if available
+      INFO("LuaExecutor watchAndExec from stdin");
+      std::string chunk;
+      std::string line;
+
+      while (watcherRunning) {
+        while (std::getline(std::cin, line)) {
+          if(line == ":run"){ // sentinal
+            break;
+          }
+          chunk += line + "\n";
+        }
+
+        if (chunk.empty()) {
+          continue;
+        }
+
         try {
-         this->exec(path);
+          exec(chunk);
         } catch (const std::exception& e) {
           LERROR("[LuaExecutor] Error");
           LERROR(e.what());
         }
-        execDoneOnce = true;
+
+        chunk.clear();
+        line.clear();
+      }
+    } else {
+      DEBUG_FULL("LuaExecutor watchAndExec executing from file " << path);
+      fs::file_time_type lastWrite = fs::last_write_time(path);
+      bool execDoneOnce = false;
+
+      while (watcherRunning) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(pollIntervalMs));
+        auto nowWrite = fs::last_write_time(path);
+        if (nowWrite != lastWrite || !execDoneOnce) {
+          lastWrite = nowWrite;
+          try {
+            this->exec(path, true);
+          } catch (const std::exception& e) {
+            LERROR("[LuaExecutor] Error");
+            LERROR(e.what());
+          }
+          execDoneOnce = true;
+        }
       }
     }
+    watcherRunning = false;
   }
 
   void LuaExecutor::watchAndExecThreaded(const std::string& path, int pollIntervalMs) {
