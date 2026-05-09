@@ -1,3 +1,6 @@
+#ifndef _COPYPASTA_LIB
+#define _COPYPASTA_LIB
+
 #include "git2/checkout.h"
 #include "git2/diff.h"
 #include "git2/patch.h"
@@ -588,7 +591,7 @@ public:
 
   TSQuery *queryNew(std::string &queryExpr) const;
 
-  std::map<std::string , std::string> getAvailableNodeTypes();
+  std::map<std::string, std::vector<std::string>> getAvailableNodeTypes();
 
   const TSLanguage* getRawLang() {return lang;};
   TSParser* getRawParser() {return parser;};
@@ -2837,11 +2840,11 @@ TSQuery * TSEngine::queryNew(std::string &queryExpr) const {
   return query;
 };
 
-std::map<std::string, std::string> TSEngine::getAvailableNodeTypes() {
-    std::map<std::string, std::string> result;
+std::map<std::string, std::vector<std::string>> TSEngine::getAvailableNodeTypes() {
+    std::map<std::string, std::vector<std::string>> result;
 
     uint32_t symbol_count = ts_language_symbol_count(lang);
-
+    DEBUG_FULL("getAvailableNodeTypes");
     for (uint32_t i = 0; i < symbol_count; ++i) {
         const char* name = ts_language_symbol_name(lang, i);
         TSSymbolType type = ts_language_symbol_type(lang, i);
@@ -2867,7 +2870,8 @@ std::map<std::string, std::string> TSEngine::getAvailableNodeTypes() {
                 break;
         }
 
-        result[name] = typeStr;
+        DEBUG_FULL(typeStr << " - " << name);
+        result[typeStr].push_back(name);        
     }
 
     return result;
@@ -3231,7 +3235,7 @@ std::vector<LibGit::FileDiff> LibGit::diff(std::string fromBlobId, std::string t
     
     f.status = delta->status;
     f.flags =  (git_diff_flag_t) delta->flags;
-                delta->nfiles; // number of files in this delta ?
+             // delta->nfiles; // number of files in this delta ?
     f.oldPath = delta->old_file.path;
     f.newPath = delta->new_file.path;
 

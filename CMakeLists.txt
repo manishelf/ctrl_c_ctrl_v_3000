@@ -90,10 +90,10 @@ if(LINK_STATIC_TS_PARSER_LIBS)
         IMPORTED_LOCATION ${CMAKE_SOURCE_DIR}/deps/libtree-sitter-parsers-all-linux-x86_64-glibc/libtree-sitter-parsers-all-linux-x86_64-glibc.a
         IMPORTED_LINK_INTERFACE_LANGUAGES "C"
       )
-  endif()
-  if(UNIX AND NOT APPLE)
-    target_compile_options(copyPasta PUBLIC -stdlib=libc++)
-    target_link_options(copyPasta PUBLIC -stdlib=libc++)
+      if(UNIX AND NOT APPLE)
+        target_compile_options(copyPasta PUBLIC -stdlib=libc++)
+        target_link_options(copyPasta PUBLIC -stdlib=libc++)
+      endif()
   endif()
 endif()
 
@@ -133,7 +133,7 @@ if(LINK_STATIC_TS_PARSER_LIBS)
             PUBLIC
             "-Wl,--whole-archive"
             $<TARGET_FILE:TS_PARSER_LIB>
-            "-Wl,--no-whole-archive" 
+            "-Wl,--no-whole-archive,--export-dynamic -rdynamic" 
       )
     endif()
 endif()
