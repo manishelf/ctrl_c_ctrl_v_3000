@@ -1,5 +1,5 @@
-#ifndef CST_TREE_HPP
-#define CST_TREE_HPP
+#ifndef TS_ENGINE_HPP
+#define TS_ENGINE_HPP
 
 #include <tree_sitter/api.h>
 #include <string_view>
@@ -9,6 +9,8 @@
 
 #include <FileReaderWriter.hpp>
 #include <Logger.hpp>
+
+namespace copypasta {
 
 class TSEngine;
 class CSTTree {
@@ -93,4 +95,6 @@ public:
 
 };
 
-#endif
+} // namespace copypasta
+
+#endif // TS_ENGINE_HPP

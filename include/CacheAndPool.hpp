@@ -11,6 +11,8 @@
 
 #include <TSEngine.hpp>
 
+namespace copypasta {
+
 class ThreadPool {
   std::vector<std::thread> workers;
   std::queue<std::function<void()>> task;
@@ -112,4 +114,6 @@ public:
   }
 };
 
-#endif
+} // namespace copypasta
+
+#endif // CACHE_AND_POOL_HPP

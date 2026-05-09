@@ -7,6 +7,8 @@
 #include <string>
 #include <set>
 
+namespace copypasta {
+
 class DirWalker {
 
 public:
@@ -345,4 +347,6 @@ void DirWalker::walk(LibGit& repo, ThreadPool &pool, Action &&action,
   }
 }
 
-#endif
+} // namespace copypasta
+
+#endif // DIR_WALKER_HPP

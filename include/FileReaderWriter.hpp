@@ -5,6 +5,8 @@
 #include <fstream>
 #include <string>
 
+namespace copypasta {
+
 namespace fs = std::filesystem;
 
 #define PCRE2_CODE_UNIT_WIDTH 8
@@ -244,6 +246,6 @@ public:
                                       PCRE2_SUBSTITUTE_EXTENDED);
 };
 
-
+} // namespace copypasta
 
 #endif // _FILE_READER_WRITER

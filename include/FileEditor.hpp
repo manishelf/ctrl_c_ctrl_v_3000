@@ -7,6 +7,9 @@
 #include <vector>
 #include <string>
 
+
+namespace copypasta {
+
 // order based on increasing precedence 
 #define FOREACH_OP(OP)                                                            \
   OP(OP_WRITE_TO)                                                                 \
@@ -91,4 +94,6 @@ private:
   static TSPoint getNewEndPoint(const Edit& edit);
 };
 
-#endif
+} // namespace copypasta 
+
+#endif // FILE_EDITOR_HPP

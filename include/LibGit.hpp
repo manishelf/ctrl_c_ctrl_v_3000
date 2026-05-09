@@ -14,6 +14,9 @@
 #include <vector>
 #include <filesystem>
 
+
+namespace copypasta {
+
 namespace fs = std::filesystem;
 
 class LibGit {
@@ -101,4 +104,6 @@ public:
                                      git_diff_options opts = GIT_DIFF_OPTIONS_INIT); 
 };
 
-#endif
+} // namespace copypasta
+
+#endif // LIB_GIT_HPP

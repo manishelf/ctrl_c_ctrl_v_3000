@@ -2,6 +2,7 @@
 #include <LuaKitty.hpp>
 
 using namespace std;
+using namespace copypasta;
 
 int main(int argc, char** argv){
   if(argc < 2) {

@@ -39,6 +39,7 @@ and put into depa/tree-sitter-parsers/tree-sitter-{lang} if make and c compiler 
 #define BUILD_CMD "make -j4 -C"
 
 
+namespace copypasta {
 
 // function pointer type for language constructor
 typedef const TSLanguage *(*TSLanguageFn)(void);
@@ -300,5 +301,7 @@ TSLangWrapper TSLoader::get(std::string lang){
   }
   throw std::runtime_error("Unable to load TS parser - " + lang + " from " + walker.path);
 }
+
+} // namespace copypasta
 
 #endif // LOADER_IMPLEMENTATION

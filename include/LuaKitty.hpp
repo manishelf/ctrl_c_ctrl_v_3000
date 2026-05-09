@@ -1,5 +1,5 @@
-#ifndef LUA_KITTY_
-#define LUA_KITTY_
+#ifndef LUA_KITTY_HPP
+#define LUA_KITTY_HPP
 
 extern "C" {
   #include "lua.h"
@@ -13,6 +13,8 @@ extern "C" {
 #include <string>
 #include <vector>
 #include <unordered_set>
+
+namespace copypasta {
 
 // TODO: remove this
 using namespace luabridge;
@@ -962,4 +964,6 @@ void LuaExecutor::bindHelpers() {
   .endNamespace(); // Helper
 }
 
-#endif
+} // namespace copypasta
+  
+#endif // LUA_KITTY_HPP

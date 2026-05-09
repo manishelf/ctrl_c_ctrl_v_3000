@@ -14,6 +14,8 @@
 #define LOG_LEVEL_NONE  3
 #define LOG_LEVEL_ERROR 4
 
+namespace copypasta {
+
 // Set active level
 extern int LOGGER_LEVEL;
 
@@ -62,5 +64,7 @@ std::string inline currentTime(){
 #define INFO(msg)       LOG(LOG_LEVEL_INFO,            "[INFO]" , msg)
 #define WARN(msg)       LOG(LOG_LEVEL_WARN,            "[WARN]" , msg)
 #define LERROR(msg)      LOG(LOG_LEVEL_ERROR,          "[ERROR]", msg)
+
+} // copypasta
 
 #endif // _COPYPASTA_LOGGER
