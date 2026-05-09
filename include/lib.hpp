@@ -1,10 +1,11 @@
-#ifndef COPYPASTA_LIB_H
-#define COPYPASTA_LIB_H
+#ifndef COPYPASTA_LIB_HPP
+#define COPYPASTA_LIB_HPP
  
 #include <FileReaderWriter.hpp>
 #include <FileEditor.hpp>
 #include <DirWalker.hpp>
 #include <TSEngine.hpp>
+#include <TsQueries.hpp>
 #include <LibGit.hpp>
 #include <CacheAndPool.hpp>
 #include <Logger.hpp>

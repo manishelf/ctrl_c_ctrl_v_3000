@@ -1,5 +1,5 @@
-#ifndef COPYPASTA_LOGGER_H
-#define COPYPASTA_LOGGER_H
+#ifndef COPYPASTA_LOGGER_HPP
+#define COPYPASTA_LOGGER_HPP
 
 #include <chrono>
 #include <string>

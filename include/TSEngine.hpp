@@ -1,5 +1,5 @@
-#ifndef CST_TREE_H
-#define CST_TREE_H
+#ifndef CST_TREE_HPP
+#define CST_TREE_HPP
 
 #include <tree_sitter/api.h>
 #include <string_view>

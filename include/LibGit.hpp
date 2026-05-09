@@ -1,5 +1,5 @@
-#ifndef LIB_GIT_H
-#define LIB_GIT_H
+#ifndef LIB_GIT_HPP
+#define LIB_GIT_HPP
 
 #include <git2/checkout.h>
 #include <git2/clone.h>

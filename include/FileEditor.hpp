@@ -1,5 +1,5 @@
-#ifndef FILE_EDITOR_H
-#define FILE_EDITOR_H
+#ifndef FILE_EDITOR_HPP
+#define FILE_EDITOR_HPP
 
 #include <FileReaderWriter.hpp>
 #include <TSEngine.hpp>

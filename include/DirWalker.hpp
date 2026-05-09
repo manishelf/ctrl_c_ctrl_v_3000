@@ -1,5 +1,5 @@
-#ifndef DIR_WALKER_H
-#define DIR_WALKER_H
+#ifndef DIR_WALKER_HPP
+#define DIR_WALKER_HPP
 
 #include <FileReaderWriter.hpp>
 #include <LibGit.hpp>

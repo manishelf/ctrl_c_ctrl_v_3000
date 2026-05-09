@@ -1,5 +1,5 @@
-#ifndef CACHE_AND_POOL_H
-#define CACHE_AND_POOL_H
+#ifndef CACHE_AND_POOL_HPP
+#define CACHE_AND_POOL_HPP
 
 #include <string>
 #include <mutex>

@@ -1,5 +1,5 @@
-#ifndef TS_LOADER_H
-#define TS_LOADER_H
+#ifndef TS_LOADER_HPP
+#define TS_LOADER_HPP
 
 #include <memory>
 #include <stdexcept>
