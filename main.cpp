@@ -1,4 +1,3 @@
-#include <lib.hpp>
 #include <LuaKitty.hpp>
 
 using namespace std;

@@ -61,6 +61,8 @@ set(SOURCES
     src/TSEngine.cpp
     src/LibGit.cpp
     src/CacheAndPool.cpp
+    src/TSLoader.cpp
+    src/LuaKitty.cpp
 )
 
 add_executable(copyPasta main.cpp ${SOURCES})
@@ -90,7 +92,7 @@ if(LINK_STATIC_TS_PARSER_LIBS)
         IMPORTED_LINK_INTERFACE_LANGUAGES "C"
       )
   else()
-      # this requires the entire app binary to be compiled with glibc clang/clang++
+      # prefer the entire app binary to be compiled with glibc clang/clang++
       # cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang ..
       set_target_properties(TS_PARSER_LIB PROPERTIES
         IMPORTED_LOCATION ${CMAKE_SOURCE_DIR}/deps/libtree-sitter-parsers-all-linux-x86_64-glibc/libtree-sitter-parsers-all-linux-x86_64-glibc.a

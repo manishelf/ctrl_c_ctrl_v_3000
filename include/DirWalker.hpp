@@ -4,9 +4,12 @@
 #include <FileReaderWriter.hpp>
 #include <LibGit.hpp>
 #include <CacheAndPool.hpp>
+#include <Logger.hpp>
+
 #include <string>
 #include <set>
 #include <atomic>
+
 
 namespace copypasta {
 
@@ -38,16 +41,32 @@ public:
     SKIP = 1,     // skip entering child dir
   };
 
-  DirWalker(std::string dir);
+  DirWalker(std::string dir) {
+    DEBUG_FULL("DirWalker ctor");
+    path = dir;
+  };
 
-  void copyConfig(DirWalker* from);
+  bool isValid(){
+    bool exists = fs::exists(path);
+    if(!exists){
+      LERROR("DirWalker isValid - path " << path << " does not exist");
+    }
+    return exists; 
+  }
 
-  bool isValid(); 
+  void copyConfig(DirWalker* other){  
+    recursive     = other->recursive;
+    obeyGitIgnore = other->obeyGitIgnore;
+    includeDotDir = other->includeDotDir;
+    ignore        = other->ignore;
+    inverted      = other->inverted;
+    matchExt      = other->matchExt;
+    filesOnly     = other->filesOnly;
+  }
 
-  std::vector<File> allChildren();
-
-  ~DirWalker();
-
+  ~DirWalker() {
+    DEBUG_FULL("DirWalker destroyed");
+  };
 
   // using WalkAction_t = std::function<ACTION(STATUS, File, void *payload)>;
 
@@ -90,34 +109,6 @@ private:
 
 // IMPL
 
-#include <Logger.hpp>
-
-DirWalker::DirWalker(std::string dir) {
-  DEBUG_FULL("DirWalker ctor");
-  path = dir;
-};
-
-bool DirWalker::isValid(){
-  bool exists = fs::exists(path);
-  if(!exists){
-    LERROR("DirWalker isValid - path " << path << " does not exist");
-  }
-  return exists; 
-}
-
-void DirWalker::copyConfig(DirWalker* other){  
-  recursive     = other->recursive;
-  obeyGitIgnore = other->obeyGitIgnore;
-  includeDotDir = other->includeDotDir;
-  ignore        = other->ignore;
-  inverted      = other->inverted;
-  matchExt      = other->matchExt;
-  filesOnly     = other->filesOnly;
-}
-
-DirWalker::~DirWalker() {
-  DEBUG_FULL("DirWalker destroyed");
-};
 
 template <typename Action>
 DirWalker::STATUS DirWalker::walk(Action &&action) {
