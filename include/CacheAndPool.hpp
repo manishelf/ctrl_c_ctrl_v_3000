@@ -4,7 +4,9 @@
 #include <string>
 #include <mutex>
 #include <map>
+#include <queue>
 #include <thread>
+#include <functional>
 
 #define PCRE2_CODE_UNIT_WIDTH 8
 #include <pcre2.h>

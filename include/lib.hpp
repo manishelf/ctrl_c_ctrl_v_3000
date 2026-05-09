@@ -11,6 +11,7 @@
 #include <Logger.hpp>
 #include <TSLoader.hpp>
 
-int LOGGER_LEVEL = LOG_LEVEL_INFO;
-
+namespace copypasta {
+	int LOGGER_LEVEL = LOG_LEVEL_INFO;
+}
 #endif

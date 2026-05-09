@@ -5,3 +5,5 @@ copyPasta
 /build
 /build-win
 /.cache
+/.vs
+/out

@@ -129,12 +129,11 @@ target_link_libraries(
 
 if(LINK_STATIC_TS_PARSER_LIBS)
     if(MSVC)
-      target_link_libraries(copyPasta
-            PUBLIC 
+      target_link_options(copyPasta PUBLIC
             "/WHOLEARCHIVE:$<TARGET_FILE:TS_PARSER_LIB>"
       )
     else()
-      target_link_libraries(copyPasta
+      target_link_options(copyPasta
             PUBLIC
             "-Wl,--whole-archive"
             $<TARGET_FILE:TS_PARSER_LIB>
