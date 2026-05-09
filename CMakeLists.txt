@@ -55,10 +55,15 @@ endif()
 
 # exec
 
-add_executable(
-  copyPasta 
-  main.cpp
+set(SOURCES
+    src/FileReaderWriter.cpp
+    src/FileEditor.cpp
+    src/TSEngine.cpp
+    src/LibGit.cpp
+    src/CacheAndPool.cpp
 )
+
+add_executable(copyPasta main.cpp ${SOURCES})
 
 # deps
 

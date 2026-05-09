@@ -1,14 +1,17 @@
-
-#ifndef LOADER_
-#define LOADER_
-
+#ifndef TS_LOADER_H
+#define TS_LOADER_H
 
 #include <memory>
 #include <stdexcept>
 #include <map>
 #include <string>
 #include <tree_sitter/api.h>
-#include <lib.hpp>
+#include <assert.h>
+
+#include <FileReaderWriter.hpp>
+#include <LibGit.hpp>
+#include <DirWalker.hpp>
+#include <Logger.hpp>
 #include <ListOfParsers.hpp>
 
 #define PCRE2_CODE_UNIT_WIDTH 8

@@ -7,8 +7,9 @@ extern "C" {
   #include "lualib.h"
 }
 #include "LuaBridge/LuaBridge.h"
+
 #include <lib.hpp>
-#include <loader.hpp>
+
 #include <string>
 #include <vector>
 #include <unordered_set>
@@ -264,8 +265,14 @@ namespace LKHelpers {
   ) {
     if (!t.isTable()) return;
   
-    if (visited.count(&t)) return; // cycle guard
-    visited.insert(&t);
+    t.push(L);
+    const void* ptr = lua_topointer(L, -1);
+    lua_pop(L, 1);
+
+    if (visited.count(ptr))
+      return;
+
+    visited.insert(ptr);
   
     t.push(L);
     lua_pushnil(L);
@@ -550,9 +557,18 @@ void LuaExecutor::bindLanguage(){
         FileReader reader(path);
         return TSEnginePool::global().get(lang->getLang()->getRaw())->parse(reader);
       })
-      .addFunction("getNodeTypes", +[](TSLangWrapper* lang){
+      .addFunction("getNodeTypes", +[](TSLangWrapper* lang, lua_State* L){
           auto eng = TSEnginePool::global().get(lang->getLang()->getRaw());
-          return eng->getAvailableNodeTypes();
+          LuaRef res = newTable(L);
+          auto types = eng->getAvailableNodeTypes();
+          for(auto entry : types){
+            LuaRef entryTable = newTable(L);
+            for(int i = 0; i < entry.second.size(); i++){
+              entryTable[i+1] = entry.second[i];
+            } 
+            res[entry.first] = entryTable; 
+          }
+          return res;
       })
     .endClass()
     .addFunction("loadLanguage", +[](const std::string& langName) {

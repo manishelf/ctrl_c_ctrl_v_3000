@@ -1,6 +1,7 @@
 path = "/home/ManishDeb/crm-soap/"
 
 local java = loadLanguage("java")
+Helpers.Table.print(java.getNodeTypes())
 -- print("staticCastHandling")
 -- -- Logger.level = 2
 -- 
@@ -55,20 +56,20 @@ local java = loadLanguage("java")
 --     git:add(file.path)
 -- end)
 
-print("find createQuery instances")
-
-gitOpenOrInit(path)
-
-local hits = findInFiles(path, [[createQuery\(\s*.*,\s*Object\[\]\.class\s*\)]], { ext = { ".java" } })
-  
-local i = 1;
-for _, h in ipairs(hits) do
-  for _, m in ipairs(h) do
-    local pos = m
-    print(pos.path .. ":" .. pos.row .. ":" .. pos.col)
-    print(pos.text)
-    print(i);
-    i = i+1;
-  end
-end
-
+-- print("find createQuery instances")
+-- 
+-- gitOpenOrInit(path)
+-- 
+-- local hits = findInFiles(path, [[createQuery\(\s*.*,\s*Object\[\]\.class\s*\)]], { ext = { ".java" } })
+--   
+-- local i = 1;
+-- for _, h in ipairs(hits) do
+--   for _, m in ipairs(h) do
+--     local pos = m
+--     print(pos.path .. ":" .. pos.row .. ":" .. pos.col)
+--     print(pos.text)
+--     print(i);
+--     i = i+1;
+--   end
+-- end
+-- 

@@ -1,7 +1,5 @@
 #include <lib.hpp>
-#include <loader.hpp>
-#include <luaKitty.hpp>
-#include <tree_sitter/api.h>
+#include <LuaKitty.hpp>
 
 using namespace std;
 
