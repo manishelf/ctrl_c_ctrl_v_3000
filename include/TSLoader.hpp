@@ -87,7 +87,7 @@ class TSLang{
   const std::string name;
   TSLang(const TSLanguage* lang, const std::string& name);
   ~TSLang();
-  const TSLanguage* getRaw(){return lang;};
+  const TSLanguage* getRaw(){ return lang; };
 };
 
 class TSLangWrapper{

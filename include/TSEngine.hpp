@@ -55,8 +55,8 @@ public:
       DEBUG("CSTTree find end");
     }
 
-  bool validate(TSInputEdit edit, size_t insertL = 0, size_t delL = 0);
-  void edit(TSInputEdit edit, const std::string_view source);
+  bool validate(const TSInputEdit edit, size_t insertL = 0, size_t delL = 0);
+  void edit(const TSInputEdit edit, const std::string_view source);
 
   std::vector<TSRange> getErrors();
 

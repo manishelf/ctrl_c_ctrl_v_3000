@@ -4,15 +4,16 @@
 #include <filesystem>
 #include <fstream>
 #include <string>
-
-namespace copypasta {
-
-namespace fs = std::filesystem;
+#include <vector>
 
 #define PCRE2_CODE_UNIT_WIDTH 8
 #include <pcre2.h>
 
 #include <tree_sitter/api.h>
+
+namespace copypasta {
+
+namespace fs = std::filesystem;
 
 class File {
 public:

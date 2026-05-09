@@ -1,8 +1,9 @@
 #include <FileReaderWriter.hpp>
 #include <CacheAndPool.hpp>
+#include <Logger.hpp>
 #include <iostream>
 #include <assert.h>
-#include <Logger.hpp>
+#include <algorithm>
 
 namespace copypasta {
 

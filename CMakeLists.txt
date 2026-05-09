@@ -91,6 +91,7 @@ if(LINK_STATIC_TS_PARSER_LIBS)
       )
   else()
       # this requires the entire app binary to be compiled with glibc clang/clang++
+      # cmake -DCMAKE_CXX_COMPILER=clang++ -DCMAKE_C_COMPILER=clang ..
       set_target_properties(TS_PARSER_LIB PROPERTIES
         IMPORTED_LOCATION ${CMAKE_SOURCE_DIR}/deps/libtree-sitter-parsers-all-linux-x86_64-glibc/libtree-sitter-parsers-all-linux-x86_64-glibc.a
         IMPORTED_LINK_INTERFACE_LANGUAGES "C"
@@ -133,7 +134,7 @@ if(LINK_STATIC_TS_PARSER_LIBS)
             "/WHOLEARCHIVE:$<TARGET_FILE:TS_PARSER_LIB>"
       )
     else()
-      target_link_options(copyPasta
+      target_link_libraries(copyPasta
             PUBLIC
             "-Wl,--whole-archive"
             $<TARGET_FILE:TS_PARSER_LIB>

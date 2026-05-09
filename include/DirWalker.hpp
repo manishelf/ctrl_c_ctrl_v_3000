@@ -6,6 +6,7 @@
 #include <CacheAndPool.hpp>
 #include <string>
 #include <set>
+#include <atomic>
 
 namespace copypasta {
 

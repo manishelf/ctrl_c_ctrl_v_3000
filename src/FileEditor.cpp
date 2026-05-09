@@ -1,6 +1,7 @@
 #include <FileEditor.hpp>
 #include <Logger.hpp>
 #include <assert.h>
+#include <algorithm>
 
 namespace copypasta {
 

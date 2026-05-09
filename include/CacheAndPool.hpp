@@ -13,6 +13,9 @@
 
 #include <TSEngine.hpp>
 
+#include <condition_variable>
+#include <atomic>
+
 namespace copypasta {
 
 class ThreadPool {
